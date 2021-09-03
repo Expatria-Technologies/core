@@ -68,7 +68,7 @@ static const emap_t target[] = {
     {TOOL_ADDR(5), NVS_GROUP_TOOLS, 5},
     {TOOL_ADDR(6), NVS_GROUP_TOOLS, 6},
     {TOOL_ADDR(7), NVS_GROUP_TOOLS, 7},
-#if N_TOOL > 8
+#if N_TOOLS > 8
 #error Increase number of tool entries!
 #endif
 #endif
