@@ -21,7 +21,7 @@
   along with Grbl.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-__attribute__((weak)) void my_plugin_init (void)
-{
+//__attribute__((weak)) void my_plugin_init (void)
+//{
     // NOOP
-}
+//}

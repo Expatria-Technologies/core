@@ -141,7 +141,7 @@ __NOTE:__ these definitions are only referenced in this file. Do __NOT__ change!
 // NOTE: Changing this value also changes the execution time of a segment in the step segment buffer.
 // When increasing this value, this stores less overall time in the segment buffer and vice versa. Make
 // certain the step segment buffer is increased/decreased to account for these changes.
-//#define ACCELERATION_TICKS_PER_SECOND 100
+#define ACCELERATION_TICKS_PER_SECOND 200
 
 // Sets the maximum step rate allowed to be written as a Grbl setting. This option enables an error
 // check in the settings module to prevent settings values that will exceed this limitation. The maximum
@@ -162,7 +162,7 @@ __NOTE:__ these definitions are only referenced in this file. Do __NOT__ change!
 // Sets which axis the tool length offset is applied. Assumes the spindle is always parallel with
 // the selected axis with the tool oriented toward the negative direction. In other words, a positive
 // tool length offset value is subtracted from the current location.
-//#define TOOL_LENGTH_OFFSET_AXIS Z_AXIS // Default z-axis. Valid values are X_AXIS, Y_AXIS, or Z_AXIS.
+#define TOOL_LENGTH_OFFSET_AXIS Z_AXIS // Default z-axis. Valid values are X_AXIS, Y_AXIS, or Z_AXIS.
 
 // Minimum planner junction speed. Sets the default minimum junction speed the planner plans to at
 // every buffer block junction, except for starting from rest and end of the buffer, which are always
@@ -212,7 +212,7 @@ __NOTE:__ these definitions are only referenced in this file. Do __NOT__ change!
 // available RAM, like when re-compiling for MCU with ample amounts of RAM. Or decrease if the MCU begins to
 // crash due to the lack of available RAM or if the CPU is having trouble keeping up with planning
 // new incoming motions as they are executed.
-// #define BLOCK_BUFFER_SIZE 36 // Uncomment to override default in planner.h.
+#define BLOCK_BUFFER_SIZE 128 // Uncomment to override default in planner.h.
 
 // Governs the size of the intermediary step segment buffer between the step execution algorithm
 // and the planner blocks. Each segment is set of steps executed at a constant velocity over a
@@ -220,7 +220,7 @@ __NOTE:__ these definitions are only referenced in this file. Do __NOT__ change!
 // block velocity profile is traced exactly. The size of this buffer governs how much step
 // execution lead time there is for other Grbl processes have to compute and do their thing
 // before having to come back and refill this buffer, currently at ~50msec of step moves.
-// #define SEGMENT_BUFFER_SIZE 10 // Uncomment to override default in stepper.h.
+#define SEGMENT_BUFFER_SIZE 10 // Uncomment to override default in stepper.h.
 
 // Configures the position after a probing cycle during Grbl's check mode. Disabled sets
 // the position to the probe target, when enabled sets the position to the start position.
@@ -291,7 +291,7 @@ __NOTE:__ these definitions are only referenced in this file. Do __NOT__ change!
 // The buffer will be written to non-volatile storage when in idle state.
 //#define BUFFER_NVSDATA_DISABLE
 
-//#define ENABLE_BACKLASH_COMPENSATION
+#define ENABLE_BACKLASH_COMPENSATION
 
 // End compile time only default configuration
 
@@ -479,7 +479,7 @@ __NOTE:__ these definitions are only referenced in this file. Do __NOT__ change!
 
 #if COMPATIBILITY_LEVEL == 0
 // Number of tools in ATC tool table, comment out to disable
-// #define N_TOOLS 8
+#define N_TOOLS 8
 #endif
 
 // Max number of entries in log for PID data reporting, to be used for tuning
