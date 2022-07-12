@@ -1,4 +1,4 @@
-## grblHAL ##
+## grblHAL PrintNC config##
 
 grblHAL has [many extensions](https://github.com/grblHAL/core/wiki) that may cause issues with some senders. As a workaround for these a [compile time option](https://github.com/grblHAL/core/wiki/Changes-from-grbl-1.1#workaround) has been added that disables extensions selectively. 
 
