@@ -1,5 +1,134 @@
 ## grblHAL changelog
 
+20220710:
+
+Core:
+
+* Moved initial stepper enable call to the core (from drivers).
+
+Drivers:
+
+* Most: updated for move of stepper enable initial stepper enable call to the core.
+
+* STM32F4xx: Fix for missing code guard, updated my_machine.h options.
+
+* STM32F7xx: Fix for incorrect `$pins` report for SPI pins.
+
+---
+
+20220709:
+
+Core:
+
+* Fix for incorrect sequencing of init calls when corexy and backlash compensation is enabled at the same time, [ESP32 issue #25](https://github.com/grblHAL/ESP32/issues/25).
+
+* Added call to driver to immediately set stepper enable signals when `$37` \(Stepper deenergize\) is changed.
+
+* Some minor improvements in settings handling and options reporting.
+
+Drivers:
+
+* iMXRT1062: Updated [SD card driver patch](https://github.com/grblHAL/iMXRT1062/tree/master/patches) with workaround for non word-aligned writes that caused file corruption. Fix for [WebUI issue #4](https://github.com/grblHAL/Plugin_WebUI/issues/4).
+
+* STM32F4xx: Added option for using timer 2 for spindle sync RPM timer as this allows spindle sync for low pin count MCUs.  
+Note that timer 2 is a 16 bit timer that had to be extended virtually to 32 bit - this _may_ affect spindle sync operation/performance.
+
+Templates:
+
+* Added plugin for Marlin style M17/M18 (M84) commands for enabing/disabling stepper drivers as fix for issue #184. 
+
+---
+
+20220703:
+
+Core:
+
+* Deprecated setting `$7` \(can be set as before but is no longer reported\). Added setting `$9` for PWM spindle options:
+```
+$9: PWM Spindle as bitfield where setting bit 0 enables the rest:
+    0 - Enable (1)
+    1 - RPM controls spindle enable signal (2)
+```
+Bit 1 in this setting replaces setting `$7`, bit 0 controls the PWM output.  
+__NOTE:__ M3 and M4 with S0 will now set the spindle enable output if `$9` is `1`. Ref [issue #156](https://github.com/grblHAL/core/issues/156).  
+__NOTE:__ the change is not backwards compatible with current 3rd party drivers, these has to be updated to match changes in the core.
+
+
+Drivers:
+
+* All: Updated for core changes related to the new `$9` setting.
+
+* ESP32: Prepared driver for ethernet interface.
+
+---
+
+20220625:
+
+Core:
+
+* Reverted config.h change that enabled COREXY as default. ESP32 issue [#31](https://github.com/grblHAL/ESP32/issues/31).
+
+Drivers:
+
+* ESP32: Updated CMakeLists.txt for spindle plugin changes.
+
+Plugins:
+
+* Spindle plugin: Added H100 VFD driver \(untested\).
+
+---
+
+20220618:
+
+Core:
+
+* Added grbl.on_reset event, new settings for VFDs++
+
+Plugins:
+
+* Spindle plugin: Added VFD manager, simplified VFD registration \(no core changes required when adding a new type\), added MODVFD VFD support, added `M104Q<n>` M-code for selecting spindle.  
+Some of these changes were adopted from [PR#9](https://github.com/grblHAL/Plugins_spindle/pull/9).
+
+---
+
+20220616:
+
+Core:
+
+* Delayed calling `hal.driver_reset` until alarm and abort states has been established.
+
+Drivers:
+
+* STM32F4xx : Fix for [issue #77](https://github.com/grblHAL/STM32F4xx/issues/77) - serial port clock selection.
+
+Plugins:
+
+* Spindle plugin: Fix for [issue #9](https://github.com/grblHAL/plugins/issues/9) - VFD spindle not stopped on STOP command.
+
+---
+
+20220612:
+
+Core:
+
+* Changed kinematics API and implementations (corexy and wallplotter) to allow backlash compensation. Ref [ESP32 issue 25](https://github.com/grblHAL/ESP32/issues/25).
+
+* Fixed feed rate handling for corexy kinematics. Ref issue #147.
+
+* Fixed tool table/tool change bugs. Ref. [ioSender issue 228](https://github.com/terjeio/ioSender/issues/228).
+
+Drivers:
+
+* iMXRT1062 : Fix for issue #38.
+
+* STM32F4xx : Added missing code guard for boards not having a spindle direction pin. Improved UART channel assignment handling.
+
+* STM32F7xx : Improved UART channel assignment handling.
+
+* ESP32 : Added missing file \(corexy.c\) to filelist, fixed incorrect URL in readme.
+
+---
+
 20220416:
 
 Drivers:

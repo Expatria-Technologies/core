@@ -77,6 +77,7 @@ PROGMEM const settings_t defaults = {
     .flags.legacy_rt_commands = DEFAULT_LEGACY_RTCOMMANDS,
     .flags.report_inches = DEFAULT_REPORT_INCHES,
     .flags.sleep_enable = DEFAULT_SLEEP_ENABLE,
+    .flags.compatibility_level = COMPATIBILITY_LEVEL,
 #if DISABLE_G92_PERSISTENCE
     .flags.g92_is_volatile = 1,
 #else
@@ -104,7 +105,13 @@ PROGMEM const settings_t defaults = {
     .steppers.step_invert.mask = DEFAULT_STEPPING_INVERT_MASK,
     .steppers.dir_invert.mask = DEFAULT_DIRECTION_INVERT_MASK,
     .steppers.ganged_dir_invert.mask = DEFAULT_GANGED_DIRECTION_INVERT_MASK,
+#if COMPATIBILITY_LEVEL <= 2
     .steppers.enable_invert.mask = INVERT_ST_ENABLE_MASK,
+#elif INVERT_ST_ENABLE_MASK
+    .steppers.enable_invert.mask = 0,
+#else
+    .steppers.enable_invert.mask = AXES_BITMASK,
+#endif
     .steppers.deenergize.mask = ST_DEENERGIZE_MASK,
 #if N_AXIS > 3
     .steppers.is_rotational.mask = (ST_ROTATIONAL_MASK & AXES_BITMASK) >> 3,
@@ -157,7 +164,7 @@ PROGMEM const settings_t defaults = {
 
     .spindle.rpm_max = DEFAULT_SPINDLE_RPM_MAX,
     .spindle.rpm_min = DEFAULT_SPINDLE_RPM_MIN,
-    .spindle.flags.pwm_action = DEFAULT_SPINDLE_PWM_ACTION,
+    .spindle.flags.enable_rpm_controlled = DEFAULT_SPINDLE_ENABLE_OFF_WITH_ZERO_SPEED,
     .spindle.invert.on = INVERT_SPINDLE_ENABLE_PIN,
     .spindle.invert.ccw = INVERT_SPINDLE_CCW_PIN,
     .spindle.invert.pwm = INVERT_SPINDLE_PWM_PIN,
@@ -333,6 +340,8 @@ static status_code_t set_report_mask (setting_id_t id, uint_fast16_t int_value);
 static status_code_t set_report_inches (setting_id_t id, uint_fast16_t int_value);
 static status_code_t set_control_invert (setting_id_t id, uint_fast16_t int_value);
 static status_code_t set_spindle_invert (setting_id_t id, uint_fast16_t int_value);
+static status_code_t set_pwm_mode (setting_id_t id, uint_fast16_t int_value);
+static status_code_t set_pwm_options (setting_id_t id, uint_fast16_t int_value);
 static status_code_t set_spindle_type (setting_id_t id, uint_fast16_t int_value);
 static status_code_t set_control_disable_pullup (setting_id_t id, uint_fast16_t int_value);
 static status_code_t set_probe_disable_pullup (setting_id_t id, uint_fast16_t int_value);
@@ -350,6 +359,7 @@ static status_code_t set_probe_allow_feed_override (setting_id_t id, uint_fast16
 static status_code_t set_tool_change_mode (setting_id_t id, uint_fast16_t int_value);
 static status_code_t set_tool_change_probing_distance (setting_id_t id, float value);
 static status_code_t set_ganged_dir_invert (setting_id_t id, uint_fast16_t int_value);
+static status_code_t set_stepper_deenergize_mask (setting_id_t id, uint_fast16_t int_value);
 #ifndef NO_SAFETY_DOOR_SUPPORT
 static status_code_t set_parking_enable (setting_id_t id, uint_fast16_t int_value);
 static status_code_t set_restore_overrides (setting_id_t id, uint_fast16_t int_value);
@@ -360,6 +370,9 @@ static char *get_linear_piece (setting_id_t id);
 #endif
 #if N_AXIS > 3
 static status_code_t set_rotational_axes (setting_id_t id, uint_fast16_t int_value);
+#endif
+#if COMPATIBILITY_LEVEL > 2
+static status_code_t set_enable_invert_mask (setting_id_t id, uint_fast16_t int_value);
 #endif
 #if COMPATIBILITY_LEVEL > 1
 static status_code_t set_limits_invert_mask (setting_id_t id, uint_fast16_t int_value);
@@ -384,16 +397,20 @@ PROGMEM static const setting_detail_t setting_detail[] = {
      { Setting_StepperIdleLockTime, Group_Stepper, "Step idle delay", "milliseconds", Format_Int16, "####0", NULL, "65535", Setting_IsLegacy, &settings.steppers.idle_lock_time, NULL, NULL },
      { Setting_StepInvertMask, Group_Stepper, "Step pulse invert", NULL, Format_AxisMask, NULL, NULL, NULL, Setting_IsLegacy, &settings.steppers.step_invert.mask, NULL, NULL },
      { Setting_DirInvertMask, Group_Stepper, "Step direction invert", NULL, Format_AxisMask, NULL, NULL, NULL, Setting_IsLegacy, &settings.steppers.dir_invert.mask, NULL, NULL },
+#if COMPATIBILITY_LEVEL <= 2
      { Setting_InvertStepperEnable, Group_Stepper, "Invert stepper enable pin(s)", NULL, Format_AxisMask, NULL, NULL, NULL, Setting_IsLegacy, &settings.steppers.enable_invert.mask, NULL, NULL },
+#else
+     { Setting_InvertStepperEnable, Group_Stepper, "Invert stepper enable pins", NULL, Format_Bool, NULL, NULL, NULL, Setting_IsLegacyFn, set_enable_invert_mask, get_int, NULL },
+#endif
 #if COMPATIBILITY_LEVEL <= 1
      { Setting_LimitPinsInvertMask, Group_Limits, "Invert limit pins", NULL, Format_AxisMask, NULL, NULL, NULL, Setting_IsLegacy, &settings.limits.invert.mask, NULL, NULL },
 #else
      { Setting_LimitPinsInvertMask, Group_Limits, "Invert limit pins", NULL, Format_Bool, NULL, NULL, NULL, Setting_IsLegacyFn, set_limits_invert_mask, get_int, NULL },
 #endif
      { Setting_InvertProbePin, Group_Probing, "Invert probe pin", NULL, Format_Bool, NULL, NULL, NULL, Setting_IsLegacyFn, set_probe_invert, get_int, is_setting_available },
-     { Setting_SpindlePWMBehaviour, Group_Spindle, "Disable spindle with zero speed", NULL, Format_Bool, NULL, NULL, NULL, Setting_IsExtended, &settings.spindle.flags.mask, NULL, is_setting_available },
-//     { Setting_SpindlePWMBehaviour, Group_Spindle, "Spindle enable vs. speed behaviour", NULL, Format_RadioButtons, "No action,Disable spindle with zero speed,Enable spindle with all speeds", NULL, NULL, Setting_IsExtended, &settings.spindle.flags.mask, NULL, NULL },
+     { Setting_SpindlePWMBehaviour, Group_Spindle, "Deprecated", NULL, Format_Bool, NULL, NULL, NULL, Setting_IsLegacyFn, set_pwm_mode, get_int, is_setting_available },
      { Setting_GangedDirInvertMask, Group_Stepper, "Ganged axes direction invert", NULL, Format_Bitfield, ganged_axes, NULL, NULL, Setting_IsExtendedFn, set_ganged_dir_invert, get_int, is_setting_available },
+     { Setting_SpindlePWMOptions, Group_Spindle, "PWM Spindle", NULL, Format_XBitfield, "Enable,RPM controls spindle enable signal", NULL, NULL, Setting_IsExtendedFn, set_pwm_options, get_int, NULL },
 #if COMPATIBILITY_LEVEL <= 1
      { Setting_StatusReportMask, Group_General, "Status report options", NULL, Format_Bitfield, "Position in machine coordinate,Buffer state,Line numbers,Feed & speed,Pin state,Work coordinate offset,Overrides,Probe coordinates,Buffer sync on WCO change,Parser state,Alarm substatus,Run substatus", NULL, NULL, Setting_IsExtendedFn, set_report_mask, get_int, NULL },
 #else
@@ -433,7 +450,7 @@ PROGMEM static const setting_detail_t setting_detail[] = {
      { Setting_PWMOffValue, Group_Spindle, "Spindle PWM off value", "percent", Format_Decimal, "##0.0", NULL, "100", Setting_IsExtended, &settings.spindle.pwm_off_value, NULL, is_setting_available },
      { Setting_PWMMinValue, Group_Spindle, "Spindle PWM min value", "percent", Format_Decimal, "##0.0", NULL, "100", Setting_IsExtended, &settings.spindle.pwm_min_value, NULL, is_setting_available },
      { Setting_PWMMaxValue, Group_Spindle, "Spindle PWM max value", "percent", Format_Decimal, "##0.0", NULL, "100", Setting_IsExtended, &settings.spindle.pwm_max_value, NULL, is_setting_available },
-     { Setting_StepperDeenergizeMask, Group_Stepper, "Steppers deenergize", NULL, Format_AxisMask, NULL, NULL, NULL, Setting_IsExtended, &settings.steppers.deenergize.mask, NULL, NULL },
+     { Setting_StepperDeenergizeMask, Group_Stepper, "Steppers deenergize", NULL, Format_AxisMask, NULL, NULL, NULL, Setting_IsExtendedFn, set_stepper_deenergize_mask, get_int, NULL },
      { Setting_SpindlePPR, Group_Spindle, "Spindle pulses per revolution (PPR)", NULL, Format_Int16, "###0", NULL, NULL, Setting_IsExtended, &settings.spindle.ppr, NULL, is_setting_available },
      { Setting_EnableLegacyRTCommands, Group_General, "Enable legacy RT commands", NULL, Format_Bool, NULL, NULL, NULL, Setting_IsExtendedFn, set_enable_legacy_rt_commands, get_int, NULL },
      { Setting_JogSoftLimited, Group_Jogging, "Limit jog commands", NULL, Format_Bool, NULL, NULL, NULL, Setting_IsExtendedFn, set_jog_soft_limited, get_int, NULL },
@@ -525,12 +542,18 @@ PROGMEM static const setting_descr_t setting_descr[] = {
     { Setting_StepperIdleLockTime, "Sets a short hold delay when stopping to let dynamics settle before disabling steppers. Value 255 keeps motors enabled." },
     { Setting_StepInvertMask, "Inverts the step signals (active low)." },
     { Setting_DirInvertMask, "Inverts the direction signals (active low)." },
+#if COMPATIBILITY_LEVEL <= 2
     { Setting_InvertStepperEnable, "Inverts the stepper driver enable signals. Most drivers uses active low enable requiring inversion.\\n\\n"
                                    "NOTE: If the stepper drivers shares the same enable signal only X is used."
     },
+#else
+    { Setting_InvertStepperEnable, "Inverts the stepper driver enable signals. Drivers using active high enable require inversion.\\n\\n" },
+#endif
     { Setting_LimitPinsInvertMask, "Inverts the axis limit input signals." },
     { Setting_InvertProbePin, "Inverts the probe input pin signal." },
-    { Setting_SpindlePWMBehaviour, "" },
+    { Setting_SpindlePWMOptions, "Enable controls PWM output availability.\\n"
+                                 "When `RPM controls spindle enable signal` is checked and M3 or M4 is active S0 switches it off and S > 0 switches it on."
+    },
     { Setting_GangedDirInvertMask, "Inverts the direction signals for the second motor used for ganged axes.\\n\\n"
                                    "NOTE: This inversion will be applied in addition to the inversion from setting $3."
     },
@@ -737,13 +760,26 @@ setting_details_t *settings_get_details (void)
     return &setting_details;
 }
 
+#if COMPATIBILITY_LEVEL > 2
+
+static status_code_t set_enable_invert_mask (setting_id_t id, uint_fast16_t int_value)
+{
+    settings.steppers.enable_invert.mask = int_value ? 0 : AXES_BITMASK;
+
+    return Status_OK;
+}
+
+#endif
+
 #if COMPATIBILITY_LEVEL > 1
+
 static status_code_t set_limits_invert_mask (setting_id_t id, uint_fast16_t int_value)
 {
     settings.limits.invert.mask = (int_value ? ~(INVERT_LIMIT_BIT_MASK) : INVERT_LIMIT_BIT_MASK) & AXES_BITMASK;
 
     return Status_OK;
 }
+
 #endif
 
 static status_code_t set_probe_invert (setting_id_t id, uint_fast16_t int_value)
@@ -763,6 +799,15 @@ static status_code_t set_ganged_dir_invert (setting_id_t id, uint_fast16_t int_v
         return Status_SettingDisabled;
 
     settings.steppers.ganged_dir_invert.mask = int_value & hal.stepper.get_ganged(false).mask;
+
+    return Status_OK;
+}
+
+static status_code_t set_stepper_deenergize_mask (setting_id_t id, uint_fast16_t int_value)
+{
+    settings.steppers.deenergize.mask = int_value;
+
+    hal.stepper.enable(settings.steppers.deenergize);
 
     return Status_OK;
 }
@@ -791,6 +836,28 @@ static status_code_t set_report_inches (setting_id_t id, uint_fast16_t int_value
 static status_code_t set_control_invert (setting_id_t id, uint_fast16_t int_value)
 {
     settings.control_invert.mask = int_value & hal.signals_cap.mask;
+
+    return Status_OK;
+}
+
+static status_code_t set_pwm_mode (setting_id_t id, uint_fast16_t int_value)
+{
+    settings.spindle.flags.enable_rpm_controlled = int_value != 0;
+
+    return Status_OK;
+}
+
+static status_code_t set_pwm_options (setting_id_t id, uint_fast16_t int_value)
+{
+    if(int_value & 0x01) {
+        if(int_value > 0b11)
+            return Status_SettingValueOutOfRange;
+        settings.spindle.flags.pwm_disable = Off;
+        settings.spindle.flags.enable_rpm_controlled = (int_value & 0b10) >> 1;
+    } else {
+        settings.spindle.flags.pwm_disable = On;
+        settings.spindle.flags.enable_rpm_controlled = Off;
+    }
 
     return Status_OK;
 }
@@ -1209,11 +1276,21 @@ static uint32_t get_int (setting_id_t id)
 
     switch(id) {
 
+#if COMPATIBILITY_LEVEL > 2
+        case Setting_InvertStepperEnable:
+            value = settings.steppers.enable_invert.mask ? 0 : 1;
+            break;
+#endif
+
 #if COMPATIBILITY_LEVEL > 1
         case Setting_LimitPinsInvertMask:
             value = settings.limits.invert.mask == INVERT_LIMIT_BIT_MASK ? 0 : 1;
             break;
 #endif
+
+        case Setting_SpindlePWMOptions:
+            value = settings.spindle.flags.pwm_disable ? 0 : (settings.spindle.flags.enable_rpm_controlled ? 0b11 : 0b01);
+            break;
 
         case Setting_Mode:
             value = settings.mode;
@@ -1273,6 +1350,10 @@ static uint32_t get_int (setting_id_t id)
                       (settings.homing.flags.manual ? bit(5) : 0) |
                        (settings.homing.flags.override_locks ? bit(6) : 0) |
                         (settings.homing.flags.keep_on_reset ? bit(7) : 0);
+            break;
+
+        case Setting_StepperDeenergizeMask:
+            value = settings.steppers.deenergize.mask;
             break;
 
         case Setting_EnableLegacyRTCommands:
@@ -1426,7 +1507,11 @@ static bool is_setting_available (const setting_detail_t *setting)
             break;
 
         case Setting_SpindlePWMBehaviour:
-            available = spindle_get_caps().variable;
+            available = false;
+            break;
+
+        case Setting_SpindlePWMOptions:
+            available = spindle_get_caps().laser;
             break;
 
         case Setting_InvertProbePin:
@@ -1479,7 +1564,7 @@ static bool is_setting_available (const setting_detail_t *setting)
 #endif
 
         case Setting_SpindleAtSpeedTolerance:
-            available = hal.spindle.cap.at_speed;
+            available = hal.spindle.cap.at_speed || hal.driver_cap.spindle_sync;
             break;
 
         case Setting_SpindleOnDelay:
@@ -1620,6 +1705,11 @@ bool read_global_settings ()
     settings.flags.g92_is_volatile = On;
 #endif
 
+#if COMPATIBILITY_LEVEL > 2
+    if(settings.steppers.enable_invert.mask)
+        settings.steppers.enable_invert.mask = AXES_BITMASK;
+#endif
+
     return ok && settings.version == SETTINGS_VERSION;
 }
 
@@ -1629,6 +1719,8 @@ void settings_write_global (void)
 {
     if(override_backup.valid)
         restore_override_backup();
+
+    settings.flags.compatibility_level = COMPATIBILITY_LEVEL;
 
     if(hal.nvs.type != NVS_None)
         hal.nvs.memcpy_to_nvs(NVS_ADDR_GLOBAL, (uint8_t *)&settings, sizeof(settings_t), true);
@@ -1655,7 +1747,8 @@ void settings_restore (settings_restore_t restore)
         settings.spindle.invert.ccw &= spindle_get_caps().direction;
         settings.spindle.invert.pwm &= spindle_get_caps().pwm_invert;
 #ifdef ENABLE_BACKLASH_COMPENSATION
-        mc_backlash_init((axes_signals_t){AXES_BITMASK});
+        if(sys.driver_started)
+            mc_backlash_init((axes_signals_t){AXES_BITMASK});
 #endif
         settings_write_global();
     }
@@ -2102,8 +2195,13 @@ status_code_t settings_store_setting (setting_id_t id, char *svalue)
     setting_details_t *set;
     const setting_detail_t *setting = setting_get_details(id, &set);
 
-    if(setting == NULL)
-        return Status_SettingDisabled;
+    if(setting == NULL) {
+        if(id == Setting_SpindlePWMBehaviour) {
+            set = &setting_details;
+            setting = &setting_detail[Setting_SpindlePWMBehaviour];
+        } else
+            return Status_SettingDisabled;
+    }
 
     // Trim leading spaces
     while(*svalue == ' ')
@@ -2238,9 +2336,7 @@ void settings_init (void)
             settings_read_tool_data(idx, &tool_table[idx]);
 #endif
         report_init();
-#ifdef ENABLE_BACKLASH_COMPENSATION
-        mc_backlash_init((axes_signals_t){AXES_BITMASK});
-#endif
+
         hal.settings_changed(&settings);
 
         if(hal.probe.configure) // Initialize probe invert mask.

@@ -50,8 +50,9 @@ typedef enum {
     Setting_InvertStepperEnable = 4,
     Setting_LimitPinsInvertMask = 5,
     Setting_InvertProbePin = 6,
-    Setting_SpindlePWMBehaviour = 7,
+    Setting_SpindlePWMBehaviour = 7, // Deprecated - replaced by Setting_SpindlePWMOptions flag
     Setting_GangedDirInvertMask = 8,
+    Setting_SpindlePWMOptions = 9,
     Setting_StatusReportMask = 10,
     Setting_JunctionDeviation = 11,
     Setting_ArcTolerance = 12,
@@ -272,23 +273,20 @@ typedef enum {
     Setting_UserDefined_8 = 458,
     Setting_UserDefined_9 = 459,
 
-    //currently below are used to hold the MODVFD register settings  Maybe find a better place for them?
-    #ifdef VFD_ENABLE
-    Setting_VFD_TYPE = 460, // Select from available VFD types
-    Setting_VFD_RPM_HZ = 461, // Set RPM/Hz (not used by all VFD types)
-    Setting_VFD_PLUGIN_10 = 462,
-    Setting_VFD_PLUGIN_11 = 463,
-    Setting_VFD_PLUGIN_12 = 464,
-    Setting_VFD_PLUGIN_13 = 465,
-    Setting_VFD_PLUGIN_14 = 466,
-    Setting_VFD_PLUGIN_15 = 467,
-    Setting_VFD_PLUGIN_16 = 468,
-    Setting_VFD_PLUGIN_17 = 469,
-    Setting_VFD_PLUGIN_18 = 470,
-    Setting_VFD_PLUGIN_19 = 471,
-    Setting_VFD_PLUGIN_20 = 472,
-    Setting_VFD_PLUGIN_21 = 473,         
-    #endif
+    Setting_VFD_ModbusAddress = 460,
+    Setting_VFD_RPM_Hz = 461,
+    Setting_VFD_10 = 462,
+    Setting_VFD_11 = 463,
+    Setting_VFD_12 = 464,
+    Setting_VFD_13 = 465,
+    Setting_VFD_14 = 466,
+    Setting_VFD_15 = 467,
+    Setting_VFD_16 = 468,
+    Setting_VFD_17 = 469,
+    Setting_VFD_18 = 470,
+    Setting_VFD_19 = 471,
+    Setting_VFD_20 = 472,
+    Setting_VFD_21 = 473,
 
     Setting_SettingsMax,
     Setting_SettingsAll = Setting_SettingsMax,
@@ -352,7 +350,8 @@ typedef union {
                  restore_after_feed_hold         :1,
                  unused1                         :1,
                  g92_is_volatile                 :1,
-                 unassigned                      :6;
+                 compatibility_level             :4,
+                 unassigned                      :2;
     };
 } settingflags_t;
 
@@ -433,19 +432,14 @@ typedef struct {
     float max_error;
 } pid_values_t;
 
-typedef enum {
-    SpindleAction_None = 0,
-    SpindleAction_DisableWithZeroSPeed,
-    SpindleAction_EnableWithAllSPeeds,
-} spindle_action_t;
-
 typedef union {
     uint8_t value;
     uint8_t mask;
     struct {
-        uint8_t pwm_action :2,
-                type       :3,
-                unassigned :3;
+        uint8_t enable_rpm_controlled :1, // PWM spindle only
+                unused                :1,
+                type                  :5,
+                pwm_disable           :1; // PWM spindle only
     };
 } spindle_settings_flags_t;
 
@@ -638,6 +632,7 @@ typedef enum {
     Group_UserSettings,
     Group_Stepper,
     Group_MotorDriver,
+    Group_VFD,
     Group_Axis,
 // NOTE: axis groups MUST be sequential AND last
     Group_Axis0,
