@@ -3,7 +3,7 @@
 
   Part of grblHAL
 
-  Copyright (c) 2017-2021 Terje Io
+  Copyright (c) 2017-2022 Terje Io
   Copyright (c) 2011-2016 Sungeun K. Jeon for Gnea Research LLC
   Copyright (c) 2009-2011 Simen Svale Skogsrud
 
@@ -104,7 +104,11 @@
 #define AXES_BITMASK (X_AXIS_BIT|Y_AXIS_BIT|Z_AXIS_BIT|A_AXIS_BIT|B_AXIS_BIT|C_AXIS_BIT|U_AXIS_BIT|V_AXIS_BIT)
 #endif
 
-#ifdef C_AXIS
+#ifdef V_AXIS
+#define N_ABC_AXIS 5
+#elif defined(U_AXIS)
+#define N_ABC_AXIS 4
+#elif defined(C_AXIS)
 #define N_ABC_AXIS 3
 #elif defined(B_AXIS)
 #define N_ABC_AXIS 2
@@ -130,6 +134,14 @@ typedef union {
                 v :1;
     };
 } axes_signals_t;
+
+typedef union {
+    float values[2];
+    struct {
+        float x;
+        float y;
+    };
+} point_2d;
 
 #pragma pack(push, 1)
 
@@ -197,6 +209,9 @@ bool read_float(char *line, uint_fast8_t *char_counter, float *float_ptr);
 void delay_sec(float seconds, delaymode_t mode);
 
 float convert_delta_vector_to_unit_vector(float *vector);
+
+// parse ISO8601 datetime
+struct tm *get_datetime (const char *s);
 
 // calculate checksum byte for data
 uint8_t calc_checksum (uint8_t *data, uint32_t size);

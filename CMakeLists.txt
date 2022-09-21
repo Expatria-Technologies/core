@@ -5,7 +5,7 @@ target_sources(grbl INTERFACE
  ${CMAKE_CURRENT_LIST_DIR}/coolant_control.c
  ${CMAKE_CURRENT_LIST_DIR}/nvs_buffer.c
  ${CMAKE_CURRENT_LIST_DIR}/gcode.c
- ${CMAKE_CURRENT_LIST_DIR}/limits.c
+ ${CMAKE_CURRENT_LIST_DIR}/machine_limits.c
  ${CMAKE_CURRENT_LIST_DIR}/motion_control.c
  ${CMAKE_CURRENT_LIST_DIR}/my_plugin.c
  ${CMAKE_CURRENT_LIST_DIR}/nuts_bolts.c
@@ -27,6 +27,5 @@ target_sources(grbl INTERFACE
  ${CMAKE_CURRENT_LIST_DIR}/ngc_expr.c
  ${CMAKE_CURRENT_LIST_DIR}/regex.c
  ${CMAKE_CURRENT_LIST_DIR}/ioports.c
+ ${CMAKE_CURRENT_LIST_DIR}/vfs.c
 )
-
-target_include_directories(grbl INTERFACE ${CMAKE_CURRENT_LIST_DIR})

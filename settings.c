@@ -29,7 +29,7 @@
 
 #include "hal.h"
 #include "defaults.h"
-#include "limits.h"
+#include "machine_limits.h"
 #include "nvs_buffer.h"
 #include "tool_change.h"
 #include "state_machine.h"
@@ -73,7 +73,15 @@ PROGMEM const settings_t defaults = {
     .junction_deviation = DEFAULT_JUNCTION_DEVIATION,
     .arc_tolerance = DEFAULT_ARC_TOLERANCE,
     .g73_retract = DEFAULT_G73_RETRACT,
-
+#ifdef BLOCK_BUFFER_DYNAMIC
+  #ifdef PLANNER_BUFFER_BLOCKS
+    .planner_buffer_blocks = PLANNER_BUFFER_BLOCKS,
+  #elif defined(BLOCK_BUFFER_SIZE)
+    .planner_buffer_blocks = BLOCK_BUFFER_SIZE,
+  #else
+    .planner_buffer_blocks = 35,
+  #endif
+#endif
     .flags.legacy_rt_commands = DEFAULT_LEGACY_RTCOMMANDS,
     .flags.report_inches = DEFAULT_REPORT_INCHES,
     .flags.sleep_enable = DEFAULT_SLEEP_ENABLE,
@@ -318,20 +326,32 @@ PROGMEM static const setting_group_detail_t setting_group_detail [] = {
      { Group_Axis, Group_XAxis, "X-axis"},
      { Group_Axis, Group_YAxis, "Y-axis"},
      { Group_Axis, Group_ZAxis, "Z-axis"},
-#ifdef A_AXIS
+#ifndef AXIS_REMAP_ABC2UVW
+  #ifdef A_AXIS
      { Group_Axis, Group_AAxis, "A-axis"},
-#endif
-#ifdef B_AXIS
+  #endif
+  #ifdef B_AXIS
      { Group_Axis, Group_BAxis, "B-axis"},
-#endif
-#ifdef C_AXIS
+  #endif
+  #ifdef C_AXIS
      { Group_Axis, Group_CAxis, "C-axis"},
-#endif
-#ifdef U_AXIS
+  #endif
+  #ifdef U_AXIS
      { Group_Axis, Group_UAxis, "U-axis"},
-#endif
-#ifdef V_AXIS
+  #endif
+  #ifdef V_AXIS
      { Group_Axis, Group_VAxis, "V-axis"}
+  #endif
+#else
+  #ifdef A_AXIS
+     { Group_Axis, Group_AAxis, "U-axis"},
+  #endif
+  #ifdef B_AXIS
+     { Group_Axis, Group_BAxis, "V-axis"},
+  #endif
+  #ifdef C_AXIS
+     { Group_Axis, Group_CAxis, "W-axis"},
+  #endif
 #endif
 };
 
@@ -505,7 +525,7 @@ PROGMEM static const setting_detail_t setting_detail[] = {
 #ifdef ENABLE_BACKLASH_COMPENSATION
      { Setting_AxisBacklash, Group_Axis0, "?-axis backlash compensation", "mm", Format_Decimal, "#####0.000", NULL, NULL, Setting_IsExtendedFn, set_axis_setting, get_float, NULL },
 #endif
-     { Setting_AxisAutoSquareOffset, Group_Axis0, "?-axis dual axis offset", "mm", Format_Decimal, "-0.000", "-2", "2", Setting_IsExtendedFn, set_axis_setting, get_float, is_setting_available },
+     { Setting_AxisAutoSquareOffset, Group_Axis0, "?-axis dual axis offset", "mm", Format_Decimal, "-0.000", "-10", "10", Setting_IsExtendedFn, set_axis_setting, get_float, is_setting_available },
      { Setting_SpindleAtSpeedTolerance, Group_Spindle, "Spindle at speed tolerance", "percent", Format_Decimal, "##0.0", NULL, NULL, Setting_IsExtended, &settings.spindle.at_speed_tolerance, NULL, is_setting_available },
      { Setting_ToolChangeMode, Group_Toolchange, "Tool change mode", NULL, Format_RadioButtons, "Normal,Manual touch off,Manual touch off @ G59.3,Automatic touch off @ G59.3,Ignore M6", NULL, NULL, Setting_IsExtendedFn, set_tool_change_mode, get_int, NULL },
      { Setting_ToolChangeProbingDistance, Group_Toolchange, "Tool change probing distance", "mm", Format_Decimal, "#####0.0", NULL, NULL, Setting_IsExtendedFn, set_tool_change_probing_distance, get_float, NULL },
@@ -518,12 +538,26 @@ PROGMEM static const setting_detail_t setting_detail[] = {
 #if COMPATIBILITY_LEVEL <= 1
      { Setting_DisableG92Persistence, Group_General, "Disable G92 persistence", NULL, Format_Bool, NULL, NULL, NULL, Setting_IsExtendedFn, set_g92_disable_persistence, get_int, NULL },
 #endif
-#if N_AXIS == 4
-     { Settings_Axis_Rotational, Group_Stepper, "Rotational axes", NULL, Format_Bitfield, "A-Axis", NULL, NULL, Setting_IsExtendedFn, set_rotational_axes, get_int, NULL },
-#elif N_AXIS == 5
-     { Settings_Axis_Rotational, Group_Stepper, "Rotational axes", NULL, Format_Bitfield, "A-Axis,B-Axis", NULL, NULL, Setting_IsExtendedFn, set_rotational_axes, get_int, NULL },
-#elif N_AXIS > 5
-     { Settings_Axis_Rotational, Group_Stepper, "Rotational axes", NULL, Format_Bitfield, "A-Axis,B-Axis,C-Axis", NULL, NULL, Setting_IsExtendedFn, set_rotational_axes, get_int, NULL },
+#ifndef AXIS_REMAP_ABC2UVW
+  #if N_AXIS == 4
+   { Settings_Axis_Rotational, Group_Stepper, "Rotational axes", NULL, Format_Bitfield, "A-Axis", NULL, NULL, Setting_IsExtendedFn, set_rotational_axes, get_int, NULL },
+  #elif N_AXIS == 5
+   { Settings_Axis_Rotational, Group_Stepper, "Rotational axes", NULL, Format_Bitfield, "A-Axis,B-Axis", NULL, NULL, Setting_IsExtendedFn, set_rotational_axes, get_int, NULL },
+  #elif N_AXIS == 6
+   { Settings_Axis_Rotational, Group_Stepper, "Rotational axes", NULL, Format_Bitfield, "A-Axis,B-Axis,C-Axis", NULL, NULL, Setting_IsExtendedFn, set_rotational_axes, get_int, NULL },
+  #elif N_AXIS == 7
+   { Settings_Axis_Rotational, Group_Stepper, "Rotational axes", NULL, Format_Bitfield, "A-Axis,B-Axis,C-Axis,U-Axis", NULL, NULL, Setting_IsExtendedFn, set_rotational_axes, get_int, NULL },
+  #elif N_AXIS == 8
+   { Settings_Axis_Rotational, Group_Stepper, "Rotational axes", NULL, Format_Bitfield, "A-Axis,B-Axis,C-Axis,U-Axis,V-Axis", NULL, NULL, Setting_IsExtendedFn, set_rotational_axes, get_int, NULL },
+  #endif
+#else
+  #if N_AXIS == 4
+     { Settings_Axis_Rotational, Group_Stepper, "Rotational axes", NULL, Format_Bitfield, "U-Axis", NULL, NULL, Setting_IsExtendedFn, set_rotational_axes, get_int, NULL },
+  #elif N_AXIS == 5
+     { Settings_Axis_Rotational, Group_Stepper, "Rotational axes", NULL, Format_Bitfield, "U-Axis,V-Axis", NULL, NULL, Setting_IsExtendedFn, set_rotational_axes, get_int, NULL },
+  #elif N_AXIS = 6
+     { Settings_Axis_Rotational, Group_Stepper, "Rotational axes", NULL, Format_Bitfield, "U-Axis,V-Axis,W-Axis", NULL, NULL, Setting_IsExtendedFn, set_rotational_axes, get_int, NULL },
+  #endif
 #endif
 #ifndef NO_SAFETY_DOOR_SUPPORT
      { Setting_DoorSpindleOnDelay, Group_SafetyDoor, "Spindle on delay", "s", Format_Decimal, "#0.0", "0.5", "20", Setting_IsExtended, &settings.safety_door.spindle_on_delay, NULL, is_setting_available },
@@ -531,6 +565,9 @@ PROGMEM static const setting_detail_t setting_detail[] = {
 #endif
      { Setting_SpindleOnDelay, Group_Spindle, "Spindle on delay", "s", Format_Decimal, "#0.0", "0.5", "20", Setting_IsExtended, &settings.safety_door.spindle_on_delay, NULL, is_setting_available },
      { Setting_SpindleType, Group_Spindle, "Default spindle", NULL, Format_RadioButtons, spindle_types, NULL, NULL, Setting_IsExtendedFn, set_spindle_type, get_int, is_setting_available },
+#ifdef BLOCK_BUFFER_DYNAMIC
+     { Setting_PlannerBlocks, Group_General, "Planner buffer blocks", NULL, Format_Int16, "####0", "30", "1000", Setting_IsExtended, &settings.planner_buffer_blocks, NULL, NULL, true },
+#endif
 };
 
 #ifndef NO_SETTINGS_DESCRIPTIONS
@@ -679,6 +716,9 @@ PROGMEM static const setting_descr_t setting_descr[] = {
     { Setting_DoorSpindleOnDelay, "Delay to allow spindle to spin up when spindle at speed tolerance is > 0." },
 #endif
     { Setting_SpindleType, "Spindle selected on startup." },
+#ifdef BLOCK_BUFFER_DYNAMIC
+    { Setting_PlannerBlocks, "Number of blocks in the planner buffer." },
+#endif
 };
 
 #endif
@@ -1188,6 +1228,10 @@ static status_code_t set_axis_setting (setting_id_t setting, float value)
             if((sys.report.homed = settings.axis[idx].max_travel != -value))
                 bit_false(sys.homed.mask, bit(idx));
             settings.axis[idx].max_travel = -value; // Store as negative for grbl internal use.
+            if(settings.homing.flags.init_lock && (sys.homing.mask & sys.homed.mask) != sys.homing.mask) {
+                system_raise_alarm(Alarm_HomingRequried);
+                grbl.report.feedback_message(Message_HomingCycleRequired);
+            }
             break;
 
         case Setting_AxisBacklash:
@@ -1428,7 +1472,9 @@ inline static uint8_t get_decimal_places (const char *format)
 char *setting_get_value (const setting_detail_t *setting, uint_fast16_t offset)
 {
     char *value = NULL;
-    setting_id_t id = (setting_id_t)(setting->id + offset);
+
+    if(setting == NULL)
+        return NULL;
 
     switch(setting->type) {
 
@@ -1459,10 +1505,79 @@ char *setting_get_value (const setting_detail_t *setting, uint_fast16_t offset)
                     value = uitoa(*((uint32_t *)(setting->value)));
                     break;
 
-                case Format_String:
                 case Format_Password:
+                    value = hal.stream.state.webui_connected ? PASSWORD_MASK : ((char *)(setting->value));
+                    break;
+
+                case Format_String:
                 case Format_IPv4:
                     value = ((char *)(setting->value));
+                    break;
+
+                default:
+                    break;
+            }
+            break;
+
+        case Setting_NonCoreFn:
+        case Setting_IsExtendedFn:
+        case Setting_IsLegacyFn:
+        case Setting_IsExpandedFn:;
+
+            setting_id_t id = (setting_id_t)(setting->id + offset);
+
+            switch(setting->datatype) {
+
+                case Format_Decimal:
+                    value = ftoa(((setting_get_float_ptr)(setting->get_value))(id), get_decimal_places(setting->format));
+                    break;
+
+                case Format_Password:
+                    value = hal.stream.state.webui_connected ? "********" : ((setting_get_string_ptr)(setting->get_value))(id);
+                    break;
+
+                case Format_String:
+                case Format_IPv4:
+                    value = ((setting_get_string_ptr)(setting->get_value))(id);
+                    break;
+
+                default:
+                    value = uitoa(((setting_get_int_ptr)(setting->get_value))(id));
+                    break;
+            }
+            break;
+    }
+
+    return value;
+}
+
+uint32_t setting_get_int_value (const setting_detail_t *setting, uint_fast16_t offset)
+{
+    uint32_t value = 0;
+
+    switch(setting->type) {
+
+        case Setting_NonCore:
+        case Setting_IsExtended:
+        case Setting_IsLegacy:
+        case Setting_IsExpanded:
+            switch(setting->datatype) {
+
+                case Format_Int8:
+                case Format_Bool:
+                case Format_Bitfield:
+                case Format_XBitfield:
+                case Format_AxisMask:
+                case Format_RadioButtons:
+                    value = *((uint8_t *)(setting->value));
+                    break;
+
+                case Format_Int16:
+                    value = *((uint16_t *)(setting->value));
+                    break;
+
+                case Format_Integer:
+                    value = *((uint32_t *)(setting->value));
                     break;
 
                 default:
@@ -1477,19 +1592,42 @@ char *setting_get_value (const setting_detail_t *setting, uint_fast16_t offset)
             switch(setting->datatype) {
 
                 case Format_Decimal:
-                    value = ftoa(((setting_get_float_ptr)(setting->get_value))(id), get_decimal_places(setting->format));
-                    break;
-
                 case Format_String:
                 case Format_Password:
                 case Format_IPv4:
-                    value = ((setting_get_string_ptr)(setting->get_value))(id);
                     break;
 
                 default:
-                    value = uitoa(((setting_get_int_ptr)(setting->get_value))(id));
+                    value = ((setting_get_int_ptr)(setting->get_value))((setting_id_t)(setting->id + offset));
                     break;
             }
+            break;
+    }
+
+    return value;
+}
+
+float setting_get_float_value (const setting_detail_t *setting, uint_fast16_t offset)
+{
+    float value = NAN;
+
+    if(setting->datatype == Format_Decimal) switch(setting->type) {
+
+        case Setting_NonCore:
+        case Setting_IsExtended:
+        case Setting_IsLegacy:
+        case Setting_IsExpanded:
+            value = *((float *)(setting->value));
+            break;
+
+        case Setting_NonCoreFn:
+        case Setting_IsExtendedFn:
+        case Setting_IsLegacyFn:
+        case Setting_IsExpandedFn:
+            value = ((setting_get_float_ptr)(setting->get_value))((setting_id_t)(setting->id + offset));
+            break;
+
+        default:
             break;
     }
 
@@ -1695,6 +1833,11 @@ bool read_global_settings ()
 
     if(settings.spindle.flags.type >= spindle_get_count())
         settings.spindle.flags.type = 0;
+
+#ifdef BLOCK_BUFFER_DYNAMIC
+    if(settings.planner_buffer_blocks < 30 || settings.planner_buffer_blocks > 1000)
+        settings.planner_buffer_blocks = 35;
+#endif
 
     sys.mode = settings.mode;
 
@@ -1999,6 +2142,22 @@ const char *setting_get_description (setting_id_t id)
     return description;
 }
 
+const setting_group_detail_t *setting_get_group_details (setting_group_t id)
+{
+    uint_fast16_t idx;
+    setting_details_t *details = settings_get_details();
+    const setting_group_detail_t *detail = NULL;
+
+    do {
+        for(idx = 0; idx < details->n_groups; idx++) {
+            if(details->groups[idx].id == id)
+                detail = &details->groups[idx];
+        }
+    } while(detail == NULL && (details = details->next));
+
+    return detail;
+}
+
 static status_code_t validate_value (const setting_detail_t *setting, float value)
 {
     float val;
@@ -2062,6 +2221,11 @@ setting_datatype_t setting_datatype_to_external (setting_datatype_t datatype)
 bool setting_is_list (const setting_detail_t *setting)
 {
     return setting->datatype == Format_Bitfield || setting->datatype == Format_XBitfield || setting->datatype == Format_RadioButtons;
+}
+
+bool setting_is_integer (const setting_detail_t *setting)
+{
+    return setting->datatype == Format_Integer || setting->datatype == Format_Int8 || setting->datatype == Format_Int16;
 }
 
 static char *remove_element (char *s, uint_fast8_t entry)
@@ -2162,8 +2326,17 @@ status_code_t setting_validate_me (const setting_detail_t *setting, float value,
                 status = Status_BadNumberFormat;
             break;
 
-        case Format_String:
         case Format_Password:
+            {
+                uint_fast16_t len = strlen(svalue);
+                if(hal.stream.state.webui_connected && len == strlen(PASSWORD_MASK) && !strcmp(PASSWORD_MASK, svalue))
+                    status = Status_InvalidStatement;
+                else
+                    status = validate_value(setting, (float)len);
+            }
+            break;
+
+        case Format_String:
             {
                 uint_fast16_t len = strlen(svalue);
                 status = validate_value(setting, (float)len);

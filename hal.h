@@ -26,6 +26,8 @@
 #ifndef _HAL_H_
 #define _HAL_H_
 
+#include <time.h>
+
 #include "grbl.h"
 #include "core_handlers.h"
 #include "gcode.h"
@@ -38,7 +40,7 @@
 #include "ioports.h"
 #include "plugins.h"
 
-#define HAL_VERSION 9
+#define HAL_VERSION 10
 
 /// Bitmap flags for driver capabilities, to be set by driver in driver_init(), flags may be cleared after to switch off option.
 typedef union {
@@ -74,6 +76,9 @@ typedef bool (*driver_setup_ptr)(settings_t *settings);
 /*! \brief Pointer to function to be called when a soft reset occurs. */
 typedef void (*driver_reset_ptr)(void);
 
+/*! \brief Pointer to function for getting free memory (as sum of all free blocks in the heap). */
+typedef uint32_t (*get_free_mem_ptr)(void);
+
 /*! \brief Optional pointer to function for switching between I/O streams.
 \param stream pointer to io_stream_t
 \returns true if switch was successful
@@ -101,15 +106,18 @@ typedef struct {
 
 /*! \brief Pointer to callback function for pin enumerations.
 \param pin pointer to the \a xbar_t structure holding the pin information.
+\param data pointer to \a void that may hold data data useful to the callback function.
 */
-typedef void (*pin_info_ptr)(xbar_t *pin);
+typedef void (*pin_info_ptr)(xbar_t *pin, void *data);
 
 /*! \brief Pointer to function for enumerate pin information.
 \param low_level true if low level information is required, false if used for reporting.
 \param callback pointer to a \a pin_info_ptr type function to receive the pin information.
+\param data pointer to \a void that can be used to pass data to the callback function. May be NULL.
 The callback function will be called for each pin.
 */
-typedef void (*enumerate_pins_ptr)(bool low_level, pin_info_ptr callback);
+typedef void (*enumerate_pins_ptr)(bool low_level, pin_info_ptr callback, void *data);
+
 
 /*************
  *  Coolant  *
@@ -266,7 +274,7 @@ typedef void (*stepper_cycles_per_tick_ptr)(uint32_t cycles_per_tick);
 For plain drivers the most of the information pointed to by the \a stepper argument can be ignored.
 The most used fields are these:
 <br>\ref stepper.step_outbits
-<br>\ref stepper.dir_outbits - these are only necessary to ouput to the drivers when \ref stepper.dir_change is true.
+<br>\ref stepper.dir_outbits - these are only necessary to output to the drivers when \ref stepper.dir_change is true.
 
 If the driver is to support spindle synced motion many more needs to be referenced...
 
@@ -357,6 +365,7 @@ typedef struct {
     probe_connected_toggle_ptr connected_toggle;    //!< Optional handler for toggling probe connected status.
 } probe_ptrs_t;
 
+
 /*******************************
  *  Tool selection and change  *
  *******************************/
@@ -382,6 +391,7 @@ typedef struct {
     tool_select_ptr select; //!< Optional handler for selecting a tool.
     tool_change_ptr change; //!< Optional handler for executing a tool change (M6).
 } tool_ptrs_t;
+
 
 /*****************
  *  User M-code  *
@@ -437,6 +447,7 @@ typedef struct {
     user_mcode_execute_ptr execute;     //!< Handler for executing a user defined M-code.
 } user_mcode_ptrs_t;
 
+
 /*******************
  *  Encoder input  *
  *******************/
@@ -470,6 +481,28 @@ typedef struct {
 */
 typedef bool (*irq_claim_ptr)(irq_type_t irq, uint_fast8_t id, irq_callback_ptr callback);
 
+
+/**************************
+ *  RTC (Real Time Clock  *
+ **************************/
+
+/*! \brief Pointer to function for setting the current datetime.
+\param datetime pointer to a \a tm struct.
+\returns true if successful.
+*/
+typedef bool (*rtc_get_datetime_ptr)(struct tm *datetime);
+
+/*! \brief Pointer to function for setting the current datetime.
+\param datetime pointer to a \a tm struct.
+\returns true if successful.
+*/
+typedef bool (*rtc_set_datetime_ptr)(struct tm *datetime);
+
+typedef struct {
+    rtc_get_datetime_ptr get_datetime;  //!< Optional handler getting the current datetime.
+    rtc_set_datetime_ptr set_datetime;  //!< Optional handler setting the current datetime.
+} rtc_ptrs_t;
+
 /*! \brief HAL structure used for the driver interface.
 
 This structure contains properties and function pointers (to handlers) that the core uses to communicate with the driver.
@@ -486,14 +519,18 @@ typedef struct {
     char *driver_options;           //!< Pointer to optional comma separated string with driver options.
     char *board;                    //!< Pointer to optional board name string.
     uint32_t f_step_timer;          //!< Frequency of main stepper timer in Hz.
+    uint32_t f_mcu;                 //!< Frequency of MCU in MHz.
     uint32_t rx_buffer_size;        //!< Input stream buffer size in bytes.
     uint32_t max_step_rate;         //!< Currently unused.
     uint8_t driver_axis_settings;   //!< Currently unused.
 
+    /*! \brief Optional pointer to function for getting free memory (as sum of all free blocks in the heap). */
+    get_free_mem_ptr get_free_mem;
+
     /*! \brief Driver setup handler.
     Called once by the core after settings has been loaded. The driver should enable MCU peripherals in the provided function.
     \param settings pointer to settings_t structure.
-    \returns true if completed sucessfully and the driver supports the _settings->version_ number, false otherwise.
+    \returns true if completed successfully and the driver supports the _settings->version_ number, false otherwise.
     */
     driver_setup_ptr driver_setup;
 
@@ -548,6 +585,7 @@ typedef struct {
     settings_changed_ptr settings_changed;  //!< Callback handler to be called on settings loaded or settings changed events.
     probe_ptrs_t probe;                     //!< Optional handlers for probe input(s).
     tool_ptrs_t tool;                       //!< Optional handlers for tool changes.
+    rtc_ptrs_t rtc;                         //!< Optional handlers for real time clock (RTC).
     io_port_t port;                         //!< Optional handlers for axuillary I/O (adds support for M62-M66).
     periph_port_t periph_port;              //!< Optional handlers for peripheral pin registration.
     driver_reset_ptr driver_reset;          //!< Optional handler, called on soft resets. Set to a dummy handler by the core at startup.
@@ -595,7 +633,7 @@ Then _hal.driver_setup()_ will be called so that the driver can configure the re
 
 __NOTE__: This is the only driver function that is called directly from the core, all others are called via HAL function pointers.
 
-\returns true if completed sucessfully and the driver matches the _hal.version number_, false otherwise.
+\returns true if completed successfully and the driver matches the _hal.version number_, false otherwise.
 */
 extern bool driver_init (void);
 

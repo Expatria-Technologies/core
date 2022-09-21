@@ -67,6 +67,7 @@ typedef union {
 typedef char ssid_t[65];
 typedef char password_t[33];
 typedef char hostname_t[33];
+typedef char sntp_server_t[129]; // URI
 
 typedef struct {
     char ip[16];
@@ -87,6 +88,15 @@ typedef enum {
     WiFiMode_AP,
     WiFiMode_APSTA
 } grbl_wifi_mode_t;
+
+typedef struct {
+    bool is_ethernet;
+    bool link_up;
+    uint16_t mbps;
+    char mac[18];
+    grbl_wifi_mode_t wifi_mode;
+    network_settings_t status;
+} network_info_t;
 
 typedef struct {
     ssid_t ssid;

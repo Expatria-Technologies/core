@@ -42,6 +42,8 @@
 
 #define SETTINGS_HARD_RESET_REQUIRED "\\n\\nNOTE: A hard reset of the controller is required after changing this setting."
 
+#define PASSWORD_MASK "********"
+
 typedef enum {
     Setting_PulseMicroseconds = 0,
     Setting_StepperIdleLockTime = 1,
@@ -195,6 +197,11 @@ typedef enum {
 
     Setting_AdminPassword = 330,
     Setting_UserPassword = 331,
+    Setting_NTPServerURI = 332,
+    Setting_NTPServerURI_2 = 333,
+    Setting_NTPServerURI_3 = 334,
+    Setting_Timezone = 335,
+    Setting_DSTActive = 336,
 
     Setting_TrinamicDriver = 338,
     Setting_TrinamicHoming = 339,
@@ -257,6 +264,9 @@ typedef enum {
     Setting_DoorCoolantOnDelay = 393,
     Setting_SpindleOnDelay = 394, // made available if safety door input not provided
     Setting_SpindleType = 395,
+    Setting_WebUiTimeout = 396,
+    Setting_WebUiAutoReportInterval = 397,
+    Setting_PlannerBlocks = 398,
 
     Setting_EncoderSettingsBase = 400, // NOTE: Reserving settings values >= 400 for encoder settings. Up to 449.
     Setting_EncoderSettingsMax = 449,
@@ -342,7 +352,7 @@ typedef union {
     struct {
         uint16_t report_inches                   :1,
                  restore_overrides               :1,
-                 unused0                         :1,
+                 dst_active                      :1, // Daylight savings time
                  sleep_enable                    :1,
                  disable_laser_during_hold       :1,
                  force_initialization_alarm      :1,
@@ -583,6 +593,9 @@ typedef struct {
     float junction_deviation;
     float arc_tolerance;
     float g73_retract;
+#ifdef BLOCK_BUFFER_DYNAMIC
+    uint16_t planner_buffer_blocks;
+#endif
     machine_mode_t mode;
     tool_change_settings_t tool_change;
     axis_settings_t axis[N_AXIS];
@@ -708,6 +721,7 @@ typedef struct setting_detail {
     void *value;
     void *get_value;
     bool (*is_available)(const struct setting_detail *setting);
+    bool reboot_required;
 } setting_detail_t;
 
 typedef struct {
@@ -801,9 +815,13 @@ const setting_detail_t *setting_get_details (setting_id_t id, setting_details_t 
 const char *setting_get_description (setting_id_t id);
 setting_datatype_t setting_datatype_to_external (setting_datatype_t datatype);
 setting_group_t settings_normalize_group (setting_group_t group);
+const setting_group_detail_t *setting_get_group_details (setting_group_t id);
 char *setting_get_value (const setting_detail_t *setting, uint_fast16_t offset);
+uint32_t setting_get_int_value (const setting_detail_t *setting, uint_fast16_t offset);
+float setting_get_float_value (const setting_detail_t *setting, uint_fast16_t offset);
 setting_id_t settings_get_axis_base (setting_id_t id, uint_fast8_t *idx);
 bool setting_is_list (const setting_detail_t *setting);
+bool setting_is_integer (const setting_detail_t *setting);
 void setting_remove_elements (setting_id_t id, uint32_t mask);
 bool settings_add_spindle_type (const char *type);
 

@@ -30,7 +30,7 @@
 #include "tool_change.h"
 #include "override.h"
 #include "protocol.h"
-#include "limits.h"
+#include "machine_limits.h"
 #include "report.h"
 #include "state_machine.h"
 #include "nvs_buffer.h"
@@ -264,7 +264,7 @@ int grbl_enter (void)
         if(!hal.driver_cap.atc)
             tc_init();
 
-        // Print welcome message. Indicates an initialization has occured at power-up or with a reset.
+        // Print welcome message. Indicates an initialization has occurred at power-up or with a reset.
         report_init_message();
 
         if(state_get() == STATE_ESTOP)

@@ -279,7 +279,7 @@ static bool stream_select (const io_stream_t *stream, bool add)
     if(!hal.stream.write_all)
         hal.stream.write_all = base.next != NULL ? stream_write_all : hal.stream.write;
 
-    if(stream->type == StreamType_WebSocket)
+    if(stream->type == StreamType_WebSocket && !stream->state.webui_connected)
         hal.stream.state.webui_connected = webui_connected;
 
     hal.stream.set_enqueue_rt_handler(protocol_enqueue_realtime_command);
@@ -359,7 +359,7 @@ io_stream_t const *stream_open_instance (uint8_t instance, uint32_t baud_rate, s
 
 bool stream_mpg_register (const io_stream_t *stream, bool rx_only, stream_write_char_ptr write_char)
 {
-    if(stream == NULL)
+    if(stream == NULL || stream->type != StreamType_Serial || stream->disable_rx == NULL)
         return false;
 
     base.flags.is_up = On;

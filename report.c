@@ -25,7 +25,7 @@
   as the protocol status messages, feedback messages, and status reports, are stored here.
   For the most part, these functions primarily are called from protocol.c methods. If a
   different style feedback is desired (i.e. JSON), then a user can change these following
-  methods to accomodate their needs.
+  methods to accommodate their needs.
 */
 
 #include <math.h>
@@ -36,7 +36,7 @@
 #include "hal.h"
 #include "report.h"
 #include "nvs_buffer.h"
-#include "limits.h"
+#include "machine_limits.h"
 #include "state_machine.h"
 #include "regex.h"
 
@@ -193,29 +193,16 @@ static char *get_rate_value_inch (float value)
 // NOTE: returns pointer to null terminator!
 inline static char *axis_signals_tostring (char *buf, axes_signals_t signals)
 {
-    if(signals.x)
-        *buf++ = 'X';
+    uint_fast16_t idx = 0;
 
-    if(signals.y)
-        *buf++ = 'Y';
+    signals.mask &= AXES_BITMASK;
 
-    if (signals.z)
-        *buf++ = 'Z';
-
-#ifdef A_AXIS
-    if (signals.a)
-        *buf++ = 'A';
-#endif
-
-#ifdef B_AXIS
-    if (signals.b)
-        *buf++ = 'B';
-#endif
-
-#ifdef C_AXIS
-    if (signals.c)
-        *buf++ = 'C';
-#endif
+    while(signals.mask) {
+        if(signals.mask & 0x01)
+            *buf++ = *axis_letter[idx];
+        idx++;
+        signals.mask >>= 1;
+    };
 
     *buf = '\0';
 
@@ -842,6 +829,8 @@ void report_execute_startup_message (char *line, status_code_t status_code)
 // Prints build info line
 void report_build_info (char *line, bool extended)
 {
+    char buf[100];
+
     hal.stream.write("[VER:" GRBL_VERSION ".");
     hal.stream.write(uitoa(GRBL_BUILD));
     hal.stream.write(":");
@@ -927,7 +916,7 @@ void report_build_info (char *line, bool extended)
     hal.stream.write(buf);
 
     // NOTE: Compiled values, like override increments/max/min values, may be added at some point later.
-    hal.stream.write(uitoa((uint32_t)(BLOCK_BUFFER_SIZE - 1)));
+    hal.stream.write(uitoa((uint32_t)plan_get_buffer_size()));
     hal.stream.write(",");
     hal.stream.write(uitoa(hal.rx_buffer_size));
     if(extended) {
@@ -975,6 +964,9 @@ void report_build_info (char *line, bool extended)
         if(hal.driver_cap.laser_ppi_mode)
             strcat(buf, "PPI,");
 
+        if(hal.reboot)
+            strcat(buf, "REBOOT,");
+
     #if NGC_EXPRESSIONS_ENABLE
         strcat(buf, "EXPR,");
     #endif
@@ -993,6 +985,13 @@ void report_build_info (char *line, bool extended)
     #ifndef NO_SETTINGS_DESCRIPTIONS
         strcat(buf, "SED,");
     #endif
+
+        if(hal.rtc.get_datetime)
+            strcat(buf, "RTC,");
+
+#ifdef AXIS_REMAP_ABC2UVW
+        strcat(buf, "ABC2UVW,");
+#endif
 
     #ifdef PID_LOG
         strcat(buf, "PID,");
@@ -1492,6 +1491,10 @@ static void report_settings_detail (settings_format_t format, const setting_deta
                     hal.stream.write(setting->max_value);
                 }
             }
+
+            if(setting->reboot_required)
+                hal.stream.write(", reboot required");
+
 #ifndef NO_SETTINGS_DESCRIPTIONS
             // Add description if driver is capable of outputting it...
             if(hal.stream.write_n) {
@@ -1509,6 +1512,11 @@ static void report_settings_detail (settings_format_t format, const setting_deta
                         hal.stream.write(ASCII_EOL);
                         hal.stream.write(description);
                     }
+                }
+                if(setting->reboot_required) {
+                    if(description && *description != '\0')
+                        hal.stream.write(ASCII_EOL ASCII_EOL);
+                    hal.stream.write(SETTINGS_HARD_RESET_REQUIRED + 4);
                 }
             }
 #endif
@@ -1537,6 +1545,8 @@ static void report_settings_detail (settings_format_t format, const setting_deta
             hal.stream.write(vbar);
             if(setting->max_value)
                 hal.stream.write(setting->max_value);
+            hal.stream.write(vbar);
+            hal.stream.write(uitoa(setting->reboot_required));
             hal.stream.write("]");
             break;
 
@@ -1654,6 +1664,8 @@ static void report_settings_detail (settings_format_t format, const setting_deta
     #ifndef NO_SETTINGS_DESCRIPTIONS
                 const char *description = setting_get_description((setting_id_t)(setting->id + offset));
                 hal.stream.write(description ? description : "");
+                if(setting->reboot_required)
+                    hal.stream.write(SETTINGS_HARD_RESET_REQUIRED + (description && *description != '\0' ? 0 : 4));
     #endif
                 hal.stream.write("\t");
 
@@ -1664,6 +1676,10 @@ static void report_settings_detail (settings_format_t format, const setting_deta
 
                 if(setting->max_value)
                     hal.stream.write(setting->max_value);
+
+                hal.stream.write("\t");
+
+                hal.stream.write(uitoa(setting->reboot_required));
             }
             break;
     }
@@ -1778,6 +1794,7 @@ status_code_t report_settings_details (settings_format_t format, setting_id_t id
 
 status_code_t report_setting_description (settings_format_t format, setting_id_t id)
 {
+    const setting_detail_t *setting = setting_get_details(id, NULL);
     const char *description = setting_get_description(id);
 
     if(format == SettingsFormat_MachineReadable) {
@@ -1786,7 +1803,9 @@ status_code_t report_setting_description (settings_format_t format, setting_id_t
         hal.stream.write(vbar);
     }
 //    hal.stream.write(description == NULL ? (is_setting_available(setting_get_details(id, NULL)) ? "" : "N/A") : description); // TODO?
-    hal.stream.write(description == NULL ? (setting_get_details(id, NULL) ? "" : "N/A") : description);
+    hal.stream.write(description ? description : (setting ? "" : "N/A"));
+    if(setting && setting->reboot_required)
+        hal.stream.write(SETTINGS_HARD_RESET_REQUIRED + (description && *description != '\0' ? 0 : 4));
 
     if(format == SettingsFormat_MachineReadable)
         hal.stream.write("]" ASCII_EOL);
@@ -1961,8 +1980,6 @@ status_code_t report_setting_group_details (bool by_id, char *prefix)
 
         uint_fast16_t idx;
 
-        details = settings_get_details();
-
         do {
             for(idx = 0; idx < details->n_groups; idx++)
                 *group++ = (setting_group_detail_t *)&details->groups[idx];
@@ -2061,7 +2078,7 @@ static const char *get_pinname (pin_function_t function)
     return name ? name : "N/A";
 }
 
-static void report_pin (xbar_t *pin)
+static void report_pin (xbar_t *pin, void *data)
 {
     hal.stream.write("[PIN:");
     if(pin->port)
@@ -2079,9 +2096,38 @@ static void report_pin (xbar_t *pin)
 status_code_t report_pins (sys_state_t state, char *args)
 {
     if(hal.enumerate_pins)
-        hal.enumerate_pins(false, report_pin);
+        hal.enumerate_pins(false, report_pin, NULL);
 
     return Status_OK;
+}
+
+static void print_uito2a (char *prefix, uint32_t v)
+{
+    hal.stream.write(prefix);
+    if(v < 10)
+        hal.stream.write("0");
+    hal.stream.write(uitoa(v));
+}
+
+status_code_t report_time (void)
+{
+    bool ok = false;
+
+    if(hal.rtc.get_datetime) {
+        struct tm time;
+        if((ok = !!hal.rtc.get_datetime(&time))) {
+            hal.stream.write("[RTC:");
+            hal.stream.write(uitoa(time.tm_year + 1900));
+            print_uito2a("-", time.tm_mon + 1);
+            print_uito2a("-", time.tm_mday);
+            print_uito2a("T", time.tm_hour);
+            print_uito2a(":", time.tm_min);
+            print_uito2a(":", time.tm_sec);
+            hal.stream.write("]" ASCII_EOL);
+        }
+    }
+
+    return ok ? Status_OK : Status_InvalidStatement;
 }
 
 void report_pid_log (void)
