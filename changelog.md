@@ -1,6 +1,67 @@
 ## grblHAL changelog
 
-20220920:
+>Build 20220928:
+
+Core:
+
+* Added crossbar support for UART RTS handshake output signal.
+
+Drivers:
+
+* iMXRT1062: Fix for issue [#48](https://github.com/grblHAL/iMXRT1062/issues/48), coolant and mist outputs swapped.
+
+* SAM3X8E: Added SMART Ramps board map. By @MrAntza99.
+
+* RP2040: Added option to use RTS handshaking for UART comms via the primary port. Updated the _citoh_cx6000_ map to use it if UART comms is enabled.
+
+* ESP32: Added laser plugin submodule and updated CMakeLists.txt with enable options for it.
+
+Templates:
+
+* my_plugin/hpgl: Added trapping of more HP7475A \(possibly all?\) `ESC . ...` device control sequences to avoid errors/hangs.
+
+---
+
+Build 20220925:
+
+Core:
+
+* Added `[AXS:<number of axes>:<axisletters>]` line to `$I` report response, replaces the string `ABC2UVW` from the `NEWOPT` element in the `$I` response.  
+
+* Fixed `|Pn:` real time report element pin state conflict: `F` is now used for motor fault and `M` for motor warning, `U`, `V` and `W` for limit switch status.
+
+Further details can be found in the [wiki](https://github.com/grblHAL/core/wiki/Report-extensions).
+
+Plugins:
+
+* Laser: Added experimental support for LaserBurn clusters, for faster engraving.
+
+* SDCard: Minor tweak to enable plugins to modify the file stream without losing real time report extensions.
+
+Drivers:
+
+* ESP32: added directory for embedded read-only files and moved related files there.
+
+---
+
+Build 20220922:
+
+Core:
+
+* Changed signature of [spindle_update_caps()](http://svn.io-engineering.com/grblHAL/html/spindle__control_8h.html#a3170b0136a49e0b30047e00bdf4e812c), third party developers must update _driver.c_ if used.
+
+* Removed some superfluous code, improved handling of laser mode M4 for jogging and motion complete event.  
+Bug fixes + expanded step/dir map to 8 axes.
+
+Drivers:
+
+* All: Updated for core signature change.
+
+* STM32F1xx: updated FatFs link to v0.14.
+
+---
+
+<a name="20220920"/>20220920:
 
 Plugins:
 
@@ -24,7 +85,6 @@ __NOTE:__ All setting values will be reset when this option is changed, backup a
 __NOTE:__ In a later version this option will be removed and dynamic allocation will become standard.  
 
 * Added experimental [configuration option](https://github.com/grblHAL/core/blob/master/config.h) `AXIS_REMAP_ABC2UVW` for remapping ABC axis letters to UVW.  
-When enabled the string `ABC2UVW` will be added to the `NEWOPT` element in the `$I` response, this can be used by senders to set up the UI etc.  
 
 Drivers:
 

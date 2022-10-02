@@ -123,6 +123,7 @@ typedef enum {
     Output_CoolantMist,
     Output_CoolantFlood,
     Output_TX,
+    Output_RTS,
     Output_SCK,
     Output_MOSI,
     Output_SdCardCS,
@@ -262,6 +263,7 @@ PROGMEM static const pin_name_t pin_names[] = {
    { .function = Output_CoolantMist,        .name = "Mist" },
    { .function = Output_CoolantFlood,       .name = "Flood" },
    { .function = Output_TX,                 .name = "TX" },
+   { .function = Output_RTS,                .name = "RTS" },
    { .function = Output_SCK,                .name = "SCK" },
    { .function = Output_MOSI,               .name = "MOSI" },
    { .function = Output_SdCardCS,           .name = "SD card CS" },
@@ -306,6 +308,7 @@ typedef enum {
     PinGroup_UART3,
     PinGroup_UART4,
     PinGroup_USB,
+    PinGroup_CAN,
 // Interrupt capable pins that may have debounce processing enabled
     PinGroup_Control       = (1<<8),
     PinGroup_Limit         = (1<<9),
