@@ -85,8 +85,6 @@
     webui_init();
 #endif
 
-#endif
-
 #if RGB_ENABLE
     extern void rgb_init (void);
     rgb_init();
