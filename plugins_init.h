@@ -85,9 +85,9 @@
     webui_init();
 #endif
 
-#if RGB_ENABLE
+#if STATUS_LIGHT_ENABLE
     extern void rgb_init (void);
-    rgb_init();
+    status_light_init();
 #endif
 
     my_plugin_init();
