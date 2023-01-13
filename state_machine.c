@@ -214,6 +214,9 @@ void state_set (sys_state_t new_state)
                     sys.flags.feed_hold_pending = Off;
                 }
                 break;
+                
+            case STATE_JOG_HOLD:                
+                break;                
 
             case STATE_SAFETY_DOOR:
                 if ((sys_state & (STATE_ALARM|STATE_ESTOP|STATE_SLEEP|STATE_CHECK_MODE)))
@@ -463,6 +466,8 @@ static void state_await_hold (uint_fast16_t rt_exec)
                     sys.parking_state = hal.control.get_state().safety_door_ajar ? Parking_DoorAjar : Parking_DoorClosed;
                 }
                 break;
+            case STATE_JOG_HOLD:                
+                break;                
 
             default:
                 break;
@@ -532,6 +537,9 @@ static void state_await_resume (uint_fast16_t rt_exec)
                     if (!await_motion) // No motion, proceed to next step immediately.
                         stateHandler(EXEC_CYCLE_COMPLETE);
                 }
+                break;
+
+            case STATE_JOG_HOLD:                
                 break;
 
             default:

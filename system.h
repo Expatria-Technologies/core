@@ -54,7 +54,12 @@ know when there is a realtime command to execute.
 #define EXEC_TLO_REPORT     bit(12)
 #define EXEC_RT_COMMAND     bit(13)
 #define EXEC_DOOR_CLOSED    bit(14)
-///@}
+
+#ifdef JOG_HOLD_ENABLE
+    #define EXEC_JOG_HOLD       bit(15)
+    #define EXEC_HOLD_RESUME    bit(16)
+#endif
+///@}0
 
 //! \def sys_state
 /*! @name System state bit map.
@@ -79,6 +84,10 @@ __NOTE:__ flags are mutually exclusive, bit map allows testing for multiple stat
 #define STATE_SLEEP         bit(7) //!< Sleep state.
 #define STATE_ESTOP         bit(8) //!< EStop mode, reports and is mainly handled similar to alarm state
 #define STATE_TOOL_CHANGE   bit(9) //!< Manual tool change, similar to #STATE_HOLD - but stops spindle and allows jogging.
+
+#ifdef JOG_HOLD_ENABLE
+    #define STATE_JOG_HOLD      bit(10) //!< Jog wile hold, similar to #STATE_HOLD - but allows jogging.
+#endif
 ///@}
 
 typedef enum {
@@ -98,7 +107,10 @@ typedef enum {
 typedef enum {
     Hold_NotHolding = 0,    //!< 0
     Hold_Complete = 1,      //!< 1
-    Hold_Pending = 2        //!< 2
+    Hold_Pending = 2,       //!< 2
+#ifdef JOG_HOLD_ENABLE    
+    Hold_Jog= 3             //!< 3
+#endif    
 } hold_state_t;
 
 typedef uint_fast16_t rt_exec_t; //!< See \ref rt_exec

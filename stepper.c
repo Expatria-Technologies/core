@@ -654,6 +654,46 @@ void st_parking_restore_buffer (void)
     pl_block = NULL; // Set to reload next block.
 }
 
+#ifdef JOG_HOLD_ENABLE
+// Changes the run state of the step segment buffer to execute the special parking motion.
+void st_jog_hold_setup_buffer (void)
+{
+    // Store step execution data of partially completed block, if necessary.
+    if (prep.recalculate.hold_partial_block && !prep.recalculate.parking) {
+        prep.last_st_block = st_prep_block;
+        memcpy(&st_hold_block, st_prep_block, sizeof(st_block_t));
+        prep.last_steps_remaining = prep.steps_remaining;
+        prep.last_dt_remainder = prep.dt_remainder;
+        prep.last_steps_per_mm = prep.steps_per_mm;
+    }
+    // Set flags to execute a parking motion
+    prep.recalculate.parking = On;
+    prep.recalculate.velocity_profile = Off;
+    pl_block = NULL; // Always reset parking motion to reload new block.
+}
+
+
+// Restores the step segment buffer to the normal run state after a parking motion.
+void st_jog_hold_restore_buffer (void)
+{
+    // Restore step execution data and flags of partially completed block, if necessary.
+    if (prep.recalculate.hold_partial_block) {
+        memcpy(prep.last_st_block, &st_hold_block, sizeof(st_block_t));
+        st_prep_block = prep.last_st_block;
+        prep.steps_remaining = prep.last_steps_remaining;
+        prep.dt_remainder = prep.last_dt_remainder;
+        prep.steps_per_mm = prep.last_steps_per_mm;
+        prep.recalculate.flags = 0;
+        prep.recalculate.hold_partial_block = prep.recalculate.velocity_profile = On;
+        prep.req_mm_increment = REQ_MM_INCREMENT_SCALAR / prep.steps_per_mm; // Recompute this value.
+    } else
+        prep.recalculate.flags = 0;
+
+    pl_block = NULL; // Set to reload next block.
+}
+
+#endif
+
 /* Prepares step segment buffer. Continuously called from main program.
 
    The segment buffer is an intermediary buffer interface between the execution of steps
