@@ -38,7 +38,7 @@ typedef enum {
     Input_MotorWarning,
     Input_LimitsOverride,
     Input_SingleBlock,
-    Input_Unassigned,
+    Input_ToolsetterOvertravel,
     Input_ProbeOvertravel,
     Input_Probe,
 // end control_signals_t sequence
@@ -50,11 +50,13 @@ typedef enum {
     Input_MotorFaultC,
     Input_MotorFaultU,
     Input_MotorFaultV,
+    Input_MotorFaultW,
     Input_MotorFaultX_2,
     Input_MotorFaultY_2,
     Input_MotorFaultZ_2,
+    Input_Probe2,
+    Input_Probe2Overtravel,
     Input_Toolsetter,
-    Input_ToolsetterOvertravel,
     Input_MPGSelect,
     Input_ModeSelect = Input_MPGSelect, // Deprecated
     Input_LimitX,
@@ -90,6 +92,9 @@ typedef enum {
     Input_LimitV,
     Input_LimitV_Max,
     Input_HomeV,
+    Input_LimitW,
+    Input_LimitW_Max,
+    Input_HomeW,
     Input_SpindleIndex,
     Input_SpindlePulse,
     Input_Aux0,
@@ -142,6 +147,7 @@ typedef enum {
     Output_StepC,
     Output_StepU,
     Output_StepV,
+    Output_StepW,
     Output_DirX,
     Output_DirX2,
     Output_DirX_2 = Output_DirX2, // deprecated
@@ -156,6 +162,7 @@ typedef enum {
     Output_DirC,
     Output_DirU,
     Output_DirV,
+    Output_DirW,
     Output_MotorChipSelect,
     Output_MotorChipSelectX,
     Output_MotorChipSelectY,
@@ -176,9 +183,10 @@ typedef enum {
     Output_StepperEnableZ2 = Output_StepperEnableZ,
     Output_StepperEnableA,
     Output_StepperEnableB,
+    Output_StepperEnableC,
     Output_StepperEnableU,
     Output_StepperEnableV,
-    Output_StepperEnableC,
+    Output_StepperEnableW,
     Output_StepperEnableXY,
     Output_StepperEnableAB,
     Output_SpindleOn,
@@ -253,6 +261,7 @@ typedef enum {
     Input_RX,
     Output_TX,
     Output_RTS,
+    Output_RS485_Direction,
     Input_QEI_A,
     Input_QEI_B,
     Input_QEI_Select,
@@ -300,6 +309,8 @@ PROGMEM static const pin_name_t pin_names[] = {
     { .function = Input_MotorFaultX_2,        .name = "X motor fault 2" },
     { .function = Input_MotorFaultY_2,        .name = "Y motor fault 2" },
     { .function = Input_MotorFaultZ_2,        .name = "Z motor fault 2" },
+    { .function = Input_Probe2,               .name = "Probe 2" },
+    { .function = Input_Probe2Overtravel,     .name = "Probe 2 overtravel" },
     { .function = Input_Toolsetter,           .name = "Toolsetter" },
     { .function = Input_ToolsetterOvertravel, .name = "Toolsetter overtravel" },
     { .function = Input_MPGSelect,            .name = "MPG mode select" },
@@ -318,7 +329,6 @@ PROGMEM static const pin_name_t pin_names[] = {
     { .function = Input_LimitZ_Max,           .name = "Z limit max" },
     { .function = Input_HomeZ,                .name = "Z home" },
     { .function = Input_HomeZ_2,              .name = "Z home 2" },
-#ifndef NO_SETTINGS_DESCRIPTIONS
     { .function = Input_SpindleIndex,         .name = "Spindle index" },
     { .function = Input_SpindlePulse,         .name = "Spindle pulse" },
     { .function = Input_Aux0,                 .name = "Aux in 0" },
@@ -353,7 +363,6 @@ PROGMEM static const pin_name_t pin_names[] = {
     { .function = Input_Analog_Aux5,          .name = "Aux analog in 5" },
     { .function = Input_Analog_Aux6,          .name = "Aux analog in 6" },
     { .function = Input_Analog_Aux7,          .name = "Aux analog in 7" },
-#endif
     { .function = Output_StepX,               .name = "X step" },
     { .function = Output_StepX2,              .name = "X2 step" },
     { .function = Output_StepY,               .name = "Y step" },
@@ -418,7 +427,15 @@ PROGMEM static const pin_name_t pin_names[] = {
     { .function = Input_HomeV,                .name = "V home" },
     { .function = Input_MotorFaultV,          .name = "V motor fault" },
 #endif
-#ifndef NO_SETTINGS_DESCRIPTIONS
+#ifdef W_AXIS
+    { .function = Output_StepW,               .name = "W step" },
+    { .function = Output_DirW,                .name = "W dir" },
+    { .function = Output_StepperEnableW,      .name = "W enable" },
+    { .function = Input_LimitW,               .name = "W limit min" },
+    { .function = Input_LimitW_Max,           .name = "W limit max" },
+    { .function = Input_HomeW,                .name = "W home" },
+    { .function = Input_MotorFaultW,          .name = "W motor fault" },
+#endif
     { .function = Output_MotorChipSelect,     .name = "Motor CS" },
     { .function = Output_MotorChipSelectX,    .name = "Motor CSX" },
     { .function = Output_MotorChipSelectY,    .name = "Motor CSY" },
@@ -493,6 +510,7 @@ PROGMEM static const pin_name_t pin_names[] = {
     { .function = Input_RX,                   .name = "RX" },
     { .function = Output_TX,                  .name = "TX" },
     { .function = Output_RTS,                 .name = "RTS" },
+    { .function = Output_RS485_Direction,     .name = "RS485 RX/TX direction" },
     { .function = Input_QEI_A,                .name = "QEI A" },
     { .function = Input_QEI_B,                .name = "QEI B" },
     { .function = Input_QEI_Select,           .name = "QEI select" },
@@ -506,7 +524,6 @@ PROGMEM static const pin_name_t pin_names[] = {
     { .function = Bidirectional_MotorUARTM5,  .name = "UART M5" },
     { .function = Bidirectional_MotorUARTM6,  .name = "UART M6" },
     { .function = Bidirectional_MotorUARTM7,  .name = "UART M7" }
-#endif
 };
 
 typedef enum {
@@ -720,22 +737,27 @@ typedef bool (*xbar_set_function_ptr)(struct xbar *pin, pin_function_t function)
 typedef void (*xbar_event_ptr)(bool on);
 typedef bool (*xbar_config_ptr)(struct xbar *pin, xbar_cfg_ptr_t cfg_data, bool persistent);
 
+// MCU port base address and pin number
 typedef struct {
-    pin_function_t function;
-    uint8_t aux_port;
-    pin_irq_mode_t irq_mode;
-    control_signals_t cap;
-    uint8_t pin;
-    void *port;
-    void *input;
+    void *port;     //!< MCU port address (may be NULL).
+    uint8_t pin;    //!< MCU pin number.
+} aux_gpio_t;
+
+typedef struct {
+    pin_function_t function;    //!< Pin function.
+    uint8_t port;               //!< Auxiliary port number, post claimed.
+    pin_irq_mode_t irq_mode;    //!< Required IRQ mode for the input.
+    control_signals_t signal;   //!< Set to the pin the input maps to, 0 if none.
+    aux_gpio_t gpio;            //!< MCU port base address (may be NULL) and pin number.
+    void *input;                //!< Pointer to the driver input array entry for the pin.
+    bool scan;                  //!< true if the pin is to be scanned when control state is requested.
 } aux_ctrl_t;
 
 typedef struct {
-    pin_function_t function;
-    uint8_t aux_port;
-    uint8_t pin;
-    void *port;
-    void *output;
+    pin_function_t function;    //!< Pin function.
+    uint8_t port;               //!< Auxiliary port number, post claimed.
+    aux_gpio_t gpio;            //!< MCU port base address (may be NULL) and pin number.
+    void *output;               //!< Pointer to the driver input array entry for the pin.
 } aux_ctrl_out_t;
 
 typedef struct xbar {
@@ -800,11 +822,23 @@ static inline bool xbar_stepper_state_get (stepper_state_t state, uint8_t axis, 
     return bit_istrue(b ? state.details.b.bits : state.details.a.bits, bit(axis));
 }
 
+static inline bool xbar_is_probe_in (pin_function_t fn)
+{
+    return fn == Input_Probe || fn == Input_Probe2 || fn == Input_Toolsetter;
+}
+
+#define N_AUX_AIN_MAX (Input_Analog_AuxMax - Input_Analog_Aux0 + 1)
+#define N_AUX_AOUT_MAX (Output_Analog_AuxMax - Output_Analog_Aux0 + 1)
+#define N_AUX_DIN_MAX (Input_AuxMax - Input_Aux0 + 1)
+#define N_AUX_DOUT_MAX (Output_AuxMax - Output_Aux0 + 1)
+
 void xbar_set_homing_source (void);
 limit_signals_t xbar_get_homing_source (void);
 limit_signals_t xbar_get_homing_source_from_cycle (axes_signals_t homing_cycle);
 axes_signals_t xbar_fn_to_axismask (pin_function_t id);
 const char *xbar_fn_to_pinname (pin_function_t id);
+const char *xbar_group_to_description ( pin_group_t group);
+const char *xbar_resolution_to_string (pin_cap_t cap);
 control_signals_t xbar_fn_to_signals_mask (pin_function_t id);
 
 #endif

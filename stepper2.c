@@ -29,6 +29,12 @@
 
 #include "stepper2.h"
 
+#ifdef DEBUGOUT
+#define ST2_DEBUG 0
+#else
+#define ST2_DEBUG 0
+#endif
+
 typedef enum {
     State_Idle = 0,     //!< 0
     State_Accel,        //!< 1
@@ -256,7 +262,7 @@ st2_motor_t *st2_motor_init (uint_fast8_t axis_idx, bool is_spindle)
 
         if(hal.timer.claim && (motor->step_inject_timer = hal.timer.claim((timer_cap_t){ .periodic = Off }, 1000))) {
             timer_cfg_t step_inject_cfg = {
-                .single_shot = true,
+                .single_shot = false,
                 .timeout_callback = motor_irq
             };
             step_inject_cfg.context = motor;
@@ -339,16 +345,8 @@ float st2_motor_set_speed (st2_motor_t *motor, float speed)
         if(pn == 0)
             return motor->speed;
 
-#ifdef DEBUGOUT
-        debug_writeln("!!");
-        debug_writeln(uitoa(motor->state));
-        debug_writeln(ftoa(motor->prev_speed, 2));
-        debug_writeln(ftoa(motor->speed, 2));
-        debug_writeln(uitoa((motor->denom - 1) >> 2));
-        debug_writeln(uitoa(motor->n));
-        debug_write(pn < 0 ? "-" : "+");
-        debug_writeln(uitoa(pn < 0 ? -pn : pn));
-        debug_writeln(uitoa(motor->denom));
+#if ST2_DEBUG
+        debug_printf("!!: %d %.2f %.3f %d %d %d %d", motor->state, motor->prev_speed, motor->speed, motor->denom - 1, motor->n, pn, motor->denom);
 #endif
 
         if(motor->speed > motor->prev_speed) {
@@ -390,15 +388,11 @@ that calls st2_motor_run().
 */
 bool st2_motor_move (st2_motor_t *motor, const float move, const float speed, position_t type)
 {
-    bool dir = move < 0.0f;
-
     if(speed == 0.0f)
         return false;
 
-    if((motor->dir.mask == 0) != dir)
-        motor->dir.mask = dir ? 0 : motor->axis.mask;
-
     motor->ptype = type;
+    motor->dir.bits = (move < 0.0f ? motor->axis.bits : 0);
 
     switch(type) {
 
@@ -417,7 +411,7 @@ bool st2_motor_move (st2_motor_t *motor, const float move, const float speed, po
     if(motor->move == 1 && type == Stepper2_Steps) {
         if(motor->state == State_Idle) {
 
-            if(motor->dir.mask)
+            if(motor->dir.bits)
                 motor->position--;
             else
                 motor->position++;
@@ -449,21 +443,14 @@ bool st2_motor_move (st2_motor_t *motor, const float move, const float speed, po
     if(motor->step_inject_timer)
         hal.timer.start(motor->step_inject_timer, motor->delay);
 
-#ifdef DEBUGOUT
+#if ST2_DEBUG
     uint32_t nn = motor->n;
     float cn = motor->first_delay;
     do {
         cn -= (2.0f * cn) / (4.0f * nn + 1);
     } while(--nn);
 
-    debug_writeln("move");
-    debug_writeln(ftoa(speed, 2));
-    debug_writeln(ftoa(settings.axis[motor->idx].steps_per_mm, 3));
-    debug_writeln(uitoa(motor->n));
-    debug_writeln(uitoa(motor->delay));
-    debug_writeln(uitoa(motor->min_delay));
-    debug_writeln(ftoa(cn, 2));
-    debug_writeln(ftoa(motor->speed, 2));
+    debug_printf("mv: %.2f %.3f %d %d %d %.2f %.2f", speed, settings.axis[motor->idx].steps_per_mm, motor->n, move, motor->delay, cn, motor->speed);
 #endif
 
     return true;
@@ -533,7 +520,7 @@ __attribute__((always_inline)) static inline bool _motor_run (st2_motor_t *motor
                 motor->state = State_Idle;
                 motor->prev_speed = 0.0f;
                 motor->n = 0;
-#ifdef DEBUGOUT
+#if ST2_DEBUG
                 debug_writeln(uitoa(motor->position));
 #endif
             } else {
@@ -561,7 +548,7 @@ __attribute__((always_inline)) static inline bool _motor_run (st2_motor_t *motor
     // output step;
     hal.stepper.output_step(motor->axis, motor->dir);
 
-    if(motor->dir.mask)
+    if(motor->dir.bits)
         motor->position--;
     else
         motor->position++;

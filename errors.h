@@ -27,6 +27,7 @@
 #include <stddef.h>
 
 // Define grblHAL status codes. Valid values (0-255)
+// Code 0 - 38 is equal to legacy Grbl codes
 typedef enum {
     Status_OK = 0,
     Status_ExpectedCommandLetter = 1,
@@ -87,6 +88,7 @@ typedef enum {
     Status_IllegalHomingConfiguration = 55,
     Status_GCodeCoordSystemLocked = 56,
     Status_UnexpectedDemarcation = 57,
+    Status_AuxiliaryPortUnavailable = 58,
 
     Status_SDMountError = 60,
     Status_FileReadError = 61,
@@ -115,7 +117,9 @@ typedef enum {
     Status_FlowControlStackOverflow = 82,
     Status_FlowControlOutOfMemory = 83,
     Status_FileOpenFailed = 84,
-    Status_StatusMax = Status_FlowControlOutOfMemory,
+    Status_FsFormatFailed = 85,
+    Status_AuxiliaryPortUnusable = 86,
+    Status_StatusMax = Status_AuxiliaryPortUnusable,
     Status_UserException = 253,
     Status_Handled,   // For internal use only
     Status_Unhandled  // For internal use only

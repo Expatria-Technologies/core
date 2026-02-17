@@ -7,18 +7,18 @@
   Copyright (c) 2011-2016 Sungeun K. Jeon for Gnea Research LLC
   Copyright (c) 2009-2011 Simen Svale Skogsrud
 
-  Grbl is free software: you can redistribute it and/or modify
+  grblHAL is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
   the Free Software Foundation, either version 3 of the License, or
   (at your option) any later version.
 
-  Grbl is distributed in the hope that it will be useful,
+  grblHAL is distributed in the hope that it will be useful,
   but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
   GNU General Public License for more details.
 
   You should have received a copy of the GNU General Public License
-  along with Grbl.  If not, see <http://www.gnu.org/licenses/>.
+  along with grblHAL. If not, see <http://www.gnu.org/licenses/>.
 */
 
 #include <stdint.h>
@@ -27,7 +27,6 @@
 #include "core_handlers.h"
 
 PROGMEM static const alarm_detail_t alarm_detail[] = {
-#ifndef NO_SETTINGS_DESCRIPTIONS
     { Alarm_HardLimit, "Hard limit has been triggered. Machine position is likely lost due to sudden halt. Re-homing is highly recommended." },
     { Alarm_SoftLimit, "Soft limit alarm. G-code motion target exceeds machine travel. Machine position retained. Alarm may be safely unlocked." },
     { Alarm_AbortCycle, "Reset/E-stop while in motion. Machine position is likely lost due to sudden halt. Re-homing is highly recommended." },
@@ -45,8 +44,10 @@ PROGMEM static const alarm_detail_t alarm_detail[] = {
     { Alarm_HomingFailAutoSquaringApproach, "Homing fail. Could not find second limit switch for auto squared axis within search distances. Try increasing max travel, decreasing pull-off distance, or check wiring." },
     { Alarm_SelftestFailed, "Power on selftest (POS) failed." },
     { Alarm_MotorFault, "Motor fault." },
-    { Alarm_HomingFail, "Homing fail. Bad configuration." }
-#endif // NO_SETTINGS_DESCRIPTIONS
+    { Alarm_HomingFail, "Homing fail. Bad configuration." },
+    { Alarm_ModbusException, "Modbus exception. Timeout or message error." },
+    { Alarm_ExpanderException, "I/O expander communication failed." },
+    { Alarm_NVS_Failed, "Non Volatile Storage (EEPROM) failure." }
 };
 
 static alarm_details_t details = {

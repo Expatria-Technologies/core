@@ -3,7 +3,7 @@
 
   Calls the init function of enabled plugins, may be included at the end of the drivers driver_init() implementation.
 
-  These are NOT referenced in the core grbl code
+  These are NOT referenced in the core grblHAL code
 
   Part of grblHAL
 
@@ -36,6 +36,11 @@
 #if PLASMA_ENABLE
     extern void plasma_init (void);
     plasma_init();
+#endif
+
+#if TOOLTABLE_ENABLE
+    extern void tooltable_init (void);
+    tooltable_init();
 #endif
 
 #if MODBUS_ENABLE && (MODBUS_ENABLE & MODBUS_RTU_ENABLED)
@@ -94,6 +99,11 @@
 #if VFD_ENABLE
     extern void vfd_init (void);
     vfd_init();
+#endif
+
+#if PROBE_ENABLE > 1
+    extern void probe_select_init (void);
+    probe_select_init();
 #endif
 
 #if BLUETOOTH_ENABLE > 1
@@ -156,7 +166,7 @@
     embroidery_init();
 #endif
 
-#if RGB_LED_ENABLE
+#if RGB_LED_ENABLE > 1
     extern void rgb_led_init (void);
     rgb_led_init();
 #endif
@@ -231,6 +241,16 @@
 #if EVENTOUT_ENABLE
     extern void event_out_init (void);
     event_out_init();
+#endif
+
+#if ATCI_ENABLE
+  extern void atci_init (void);
+  atci_init();
+#endif
+
+#if M800_ENABLE
+  extern void keyway_init (void);
+  keyway_init();
 #endif
 
 // End third party plugin definitions.

@@ -40,7 +40,7 @@
 
 static char buf[STRLEN_COORDVALUE + 1];
 
-static const float froundvalues[MAX_PRECISION + 1] =
+PROGMEM static const float froundvalues[MAX_PRECISION + 1] =
 {
     0.5f,                // 0
     0.05f,               // 1
@@ -59,36 +59,47 @@ static const float froundvalues[MAX_PRECISION + 1] =
 #error "Illegal remapping of ABC axes!"
 #endif
 
-char const *const axis_letter[N_AXIS] = {
-    "X",
-    "Y",
-    "Z"
+const coord_data_t null_vector = {0};
+
+static const char axis_letters[] = {
+    AXIS0_LETTER, '\0',
+    AXIS1_LETTER, '\0',
+    AXIS2_LETTER, '\0',
 #if N_AXIS > 3
-  #if !AXIS_REMAP_ABC2UVW
-    ,"A"
-  #else
-    ,"U"
-  #endif
+    AXIS3_LETTER, '\0',
 #endif
 #if N_AXIS > 4
-  #if !AXIS_REMAP_ABC2UVW
-    ,"B"
-  #else
-    ,"V"
-  #endif
+    AXIS4_LETTER, '\0',
 #endif
 #if N_AXIS > 5
- #if !AXIS_REMAP_ABC2UVW
-    ,"C"
-  #else
-    ,"W"
-  #endif
+    AXIS5_LETTER, '\0',
 #endif
 #if N_AXIS > 6
-    ,"U"
+    AXIS6_LETTER, '\0',
 #endif
 #if N_AXIS > 7
-    ,"V"
+    AXIS7_LETTER, '\0',
+#endif
+};
+
+char const *const axis_letter[N_AXIS] = {
+    &axis_letters[0 << 1],
+    &axis_letters[1 << 1],
+    &axis_letters[2 << 1],
+#if N_AXIS > 3
+    &axis_letters[3 << 1],
+#endif
+#if N_AXIS > 4
+    &axis_letters[4 << 1],
+#endif
+#if N_AXIS > 5
+    &axis_letters[5 << 1],
+#endif
+#if N_AXIS > 6
+    &axis_letters[6 << 1],
+#endif
+#if N_AXIS > 7
+    &axis_letters[7 << 1],
 #endif
 };
 
@@ -181,9 +192,9 @@ char *trim_float (char *s)
 }
 
 // Extracts an unsigned integer value from a string.
-status_code_t read_uint (char *line, uint_fast8_t *char_counter, uint32_t *uint_ptr)
+status_code_t read_uint (const char *line, uint_fast8_t *char_counter, uint32_t *uint_ptr)
 {
-    char *ptr = line + *char_counter;
+    const char *ptr = line + *char_counter;
     int_fast8_t exp = 0;
     uint_fast8_t ndigit = 0, c;
     uint32_t intval = 0;
@@ -239,9 +250,9 @@ status_code_t read_uint (char *line, uint_fast8_t *char_counter, uint32_t *uint_
 // Scientific notation is officially not supported by g-code, and the 'E' character may
 // be a g-code word on some CNC systems. So, 'E' notation will not be recognized.
 // NOTE: Thanks to Radu-Eosif Mihailescu for identifying the issues with using strtod().
-bool read_float (char *line, uint_fast8_t *char_counter, float *float_ptr)
+bool read_float (const char *line, uint_fast8_t *char_counter, float *float_ptr)
 {
-    char *ptr = line + *char_counter;
+    const char *ptr = line + *char_counter;
     int_fast8_t exp = 0;
     uint_fast8_t ndigit = 0, c;
     uint32_t intval = 0;
@@ -310,7 +321,7 @@ bool isintf (float value)
 }
 
 // Non-blocking delay function used for general operation and suspend features.
-bool delay_sec (float seconds, delaymode_t mode)
+FLASHMEM bool delay_sec (float seconds, delaymode_t mode)
 {
     bool ok = true;
 
@@ -350,8 +361,18 @@ float convert_delta_vector_to_unit_vector (float *vector)
     return magnitude;
 }
 
+FLASHMEM void rotate (coord_data_t *pt, plane_t plane, float angle /*rad*/)
+{
+    float cos = cosf(angle), sin = sinf(angle),
+          t0 = pt->values[plane.axis_0] * cos - pt->values[plane.axis_1] * sin,
+          t1 = pt->values[plane.axis_0] * sin + pt->values[plane.axis_1] * cos;
+
+    pt->values[plane.axis_0] = t0;
+    pt->values[plane.axis_1] = t1;
+}
+
 // parse ISO8601 datetime: YYYY-MM-DDTHH:MM:SSZxxx
-struct tm *get_datetime (const char *s)
+FLASHMEM struct tm *get_datetime (const char *s)
 {
     static struct tm dt;
     PROGMEM static const uint8_t mdays[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};

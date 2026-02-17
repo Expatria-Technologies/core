@@ -3,7 +3,7 @@
 
   Part of grblHAL
 
-  Copyright (c) 2021-2025 Terje Io
+  Copyright (c) 2021-2026 Terje Io
 
   grblHAL is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -37,6 +37,8 @@
 #include "system.h"
 #include "settings.h"
 #include "ngc_params.h"
+#include "state_machine.h"
+#include "modbus.h"
 
 #ifndef NGC_MAX_CALL_LEVEL
 #define NGC_MAX_CALL_LEVEL 10
@@ -81,73 +83,114 @@ typedef struct ngc_string_param {
 typedef struct {
     uint32_t level;
     void *context;
-    gc_modal_t *modal_state;
+    gc_modal_snapshot_t *modal_state;
 } ngc_param_context_t;
 
 static int32_t call_level = -1;
 static void *call_context;
-static gc_modal_t *modal_state;
+static gc_modal_snapshot_t *modal_state;
 static ngc_param_context_t call_levels[NGC_MAX_CALL_LEVEL];
 static ngc_rw_param_t *rw_params = NULL;
 static ngc_named_rw_param_t *rw_global_params = NULL;
 static ngc_string_id_t ref_id = (uint32_t)-1;
 static ngc_string_param_t *ngc_string_params = NULL;
+static on_macro_execute_ptr on_macro_execute;
 
-static float _absolute_pos (uint_fast8_t axis)
+PROGMEM static const uint8_t axis_map[] = {
+#ifdef ROTATION_ENABLE
+    10,
+#else
+    255, // R - XY rotation angle around the Z axis. N/A.
+#endif
+    X_AXIS,
+    Y_AXIS,
+    Z_AXIS,
+#ifdef A_AXIS
+    A_AXIS,
+#else
+    255,
+#endif
+#ifdef B_AXIS
+    B_AXIS,
+#else
+    255,
+#endif
+#ifdef C_AXIS
+    C_AXIS,
+#else
+    255,
+#endif
+#ifdef U_AXIS
+    U_AXIS,
+#else
+    255,
+#endif
+#ifdef V_AXIS
+    V_AXIS,
+#else
+    255,
+#endif
+#ifdef W_AXIS
+    W_AXIS
+#else
+    255
+#endif
+};
+
+#if N_AXIS > 3
+
+FLASHMEM static float _convert_pos (float value, uint_fast8_t axis)
 {
-    float value;
-
-    if(axis < N_AXIS) {
-        value = sys.position[axis] / settings.axis[axis].steps_per_mm;
-        if(settings.flags.report_inches)
-            value *= 25.4f;
-    } else
-        value = 0.0f;
-
-    return value;
+    return settings.flags.report_inches && bit_isfalse(settings.steppers.is_rotary.mask, bit(axis)) ? value * 25.4f : value;
 }
 
-static float _relative_pos (uint_fast8_t axis)
+#else
+
+FLASHMEM static inline float _convert_pos (float value, uint_fast8_t axis)
 {
-    float value;
+    return settings.flags.report_inches ? value * 25.4f : value;
+}
 
-    if(axis < N_AXIS) {
-        value = sys.position[axis] / settings.axis[axis].steps_per_mm - gc_get_offset(axis, false);
-        if(settings.flags.report_inches)
-            value *= 25.4f;
-    } else
-        value = 0.0f;
+#endif
 
-    return value;
+FLASHMEM static float _absolute_pos (uint_fast8_t axis)
+{
+    axis = axis_map[axis];
+
+    return _convert_pos(axis <= 9 ? sys.position[axis] / settings.axis[axis].steps_per_mm : 0.0f, axis);
+}
+
+FLASHMEM static float _relative_pos (uint_fast8_t axis)
+{
+    axis = axis_map[axis];
+
+    return _convert_pos(axis <= 9 ? sys.position[axis] / settings.axis[axis].steps_per_mm - gc_get_offset(axis, false) : 0.0f, axis);
 }
 
 // numbered parameters
 
-static float probe_coord (ngc_param_id_t id)
+FLASHMEM static float probe_coord (ngc_param_id_t id)
 {
     float value = 0.0f;
-    uint_fast8_t axis = (id % 10) - 1;
-    coord_system_t data;
+    uint_fast8_t axis = axis_map[(id % 10)];
+    coord_system_data_t offset;
 
-    if(axis < N_AXIS && (sys.probe_coordsys_id == gc_state.modal.coord_system.id || settings_read_coord_data(sys.probe_coordsys_id, &data.xyz))) {
+    if(axis <= 9 && (sys.probe_coordsys_id == gc_state.modal.g5x_offset.id || settings_read_coord_data(sys.probe_coordsys_id, &offset)))
         value = sys.probe_position[axis] / settings.axis[axis].steps_per_mm -
-                 (sys.probe_coordsys_id == gc_state.modal.coord_system.id ? gc_state.modal.coord_system.xyz[axis] : data.xyz[axis]);
-        if(settings.flags.report_inches)
-            value *= 25.4f;
-    }
+                 (sys.probe_coordsys_id == gc_state.modal.g5x_offset.id ? gc_state.modal.g5x_offset.data.coord.values[axis] : offset.coord.values[axis]);
 
-    return value;
+    return _convert_pos(value, axis);
 }
 
-static float scaling_factors (ngc_param_id_t id)
+FLASHMEM static float scaling_factors (ngc_param_id_t id)
 {
     float *factors = gc_get_scaling();
-    uint_fast8_t axis = id % 10;
+    uint_fast8_t axis = axis_map[(id % 10)];
 
-    return axis <= N_AXIS ? factors[axis - 1] : 0.0f;
+    return axis <= 9 ? factors[axis] : 0.0f;
 }
 
-static float probe_result (ngc_param_id_t id)
+FLASHMEM static float probe_result (ngc_param_id_t id)
 {
     return sys.flags.probe_succeeded ? 1.0f : 0.0f;
 }
@@ -155,131 +198,131 @@ static float probe_result (ngc_param_id_t id)
 /*
 static float home_pos (ngc_param_id_t id)
 {
-    uint_fast8_t axis = id % 10;
+    uint_fast8_t axis = axis_map[(id % 10)];
 
     return axis <= N_AXIS ? sys.home_position[axis - 1] : 0.0f;
 }
 */
-static float m66_result (ngc_param_id_t id)
+FLASHMEM static float m66_result (ngc_param_id_t id)
 {
     return (float)sys.var5399;
 }
 
-static float tool_number (ngc_param_id_t id)
+FLASHMEM static float tool_number (ngc_param_id_t id)
 {
     return (float)gc_state.tool->tool_id;
 }
 
-static float tool_offset (ngc_param_id_t id)
+FLASHMEM static float tool_offset (ngc_param_id_t id)
 {
-    uint_fast8_t axis = id % 10;
+    uint_fast8_t axis = axis_map[(id % 10)];
 
-    return axis <= N_AXIS ? gc_state.tool_length_offset[axis] : 0.0f;
+    return axis <= 9 ? gc_state.modal.tool_length_offset[axis] : 0.0f;
 }
 
-static float g28_home (ngc_param_id_t id)
+FLASHMEM static float g28_home (ngc_param_id_t id)
 {
     float value = 0.0f;
-    uint_fast8_t axis = id % 10;
-    coord_system_t data;
+    uint_fast8_t axis = axis_map[(id % 10)];
+    coord_system_data_t offset;
 
-    if(axis <= N_AXIS && settings_read_coord_data(CoordinateSystem_G28, &data.xyz))
-        value = data.xyz[axis - 1];
+    if(axis <= 9 && settings_read_coord_data(CoordinateSystem_G28, &offset))
+        value = offset.coord.values[axis];
 
     return value;
 }
 
-static float g30_home (ngc_param_id_t id)
+FLASHMEM static float g30_home (ngc_param_id_t id)
 {
     float value = 0.0f;
-    uint_fast8_t axis = id % 10;
-    coord_system_t data;
+    uint_fast8_t axis = axis_map[(id % 10)];
+    coord_system_data_t offset;
 
-#if COMPATIBILITY_LEVEL > 1
-    if(id <= CoordinateSystem_G59) {
-#endif
-    if (axis <= N_AXIS && settings_read_coord_data(CoordinateSystem_G30, &data.xyz))
-        value = data.xyz[axis - 1];
-#if COMPATIBILITY_LEVEL > 1
-    }
-#endif
+    if(axis <= 9 && settings_read_coord_data(CoordinateSystem_G30, &offset))
+        value = offset.coord.values[axis];
 
     return value;
 }
 
-static float coord_system (ngc_param_id_t id)
+FLASHMEM static float coord_system (ngc_param_id_t id)
 {
-    return (float)gc_state.modal.coord_system.id + 1;
+    return (float)gc_state.modal.g5x_offset.id + 1;
 }
 
-static float coord_system_offset (ngc_param_id_t id)
+FLASHMEM static float coord_system_offset (ngc_param_id_t id)
 {
     float value = 0.0f;
     uint_fast8_t axis = id % 10;
-    coord_system_t data;
+    coord_system_data_t offset;
 
     id = (id - 5220 - axis - (id == 0 ? 10 : 0)) / 20;
+    axis = axis_map[axis];
 
-    if (axis > 0 && axis <= N_AXIS && settings_read_coord_data((coord_system_id_t)id, &data.xyz))
-        value = data.xyz[axis - 1];
-
-    return value;
-}
-
-static float g92_offset_applied (ngc_param_id_t id)
-{
-    return (float)gc_state.g92_coord_offset_applied;
-}
-
-static float g92_offset (ngc_param_id_t id)
-{
-    uint_fast8_t axis = id % 10;
-
-    return axis <= N_AXIS ? gc_state.g92_coord_offset [axis - 1] : 0.0f;
-}
-
-static float work_position (ngc_param_id_t id)
-{
-    float value = 0.0f;
-    uint_fast8_t axis = id % 10;
-
-    if(axis < N_AXIS)
-        value = _relative_pos(axis);
+#if COMPATIBILITY_LEVEL > 1
+  if(id <= CoordinateSystem_G59) {
+#endif
+#ifdef ROTATION_ENABLE
+    if(axis <= 10 && settings_read_coord_data((coord_system_id_t)id, &offset))
+        value = axis == 10 ? offset.rotation : offset.coord.values[axis];
+#else
+    if(axis <= 9 && settings_read_coord_data((coord_system_id_t)id, &offset))
+        value = offset.coord.values[axis];
+#endif
+#if COMPATIBILITY_LEVEL > 1
+  }
+#endif
 
     return value;
 }
 
-static float debug_output (ngc_param_id_t id)
+FLASHMEM static float g92_offset_applied (ngc_param_id_t id)
+{
+    return (float)gc_state.g92_offset_applied;
+}
+
+FLASHMEM static float g92_offset (ngc_param_id_t id)
+{
+    uint_fast8_t axis = axis_map[(id % 10)];
+
+    return axis <= 9 ? gc_state.g92_offset.coord.values[axis] : 0.0f;
+}
+
+FLASHMEM static float work_position (ngc_param_id_t id)
+{
+    return _relative_pos(id % 10 + 1);
+}
+
+FLASHMEM static float debug_output (ngc_param_id_t id)
 {
     return (float)settings.flags.ngc_debug_out;
 }
 
 PROGMEM static const ngc_ro_param_t ngc_ro_params[] = {
-    { .id_min = 5061, .id_max = 5069, .get = probe_coord },        // LinuxCNC
-    { .id_min = 5070, .id_max = 5070, .get = probe_result },       // LinuxCNC
+    { .id_min = 5061, .id_max = 5069, .get = probe_coord },         // LinuxCNC
+    { .id_min = 5070, .id_max = 5070, .get = probe_result },        // LinuxCNC
     { .id_min = 5161, .id_max = 5169, .get = g28_home },
     { .id_min = 5181, .id_max = 5189, .get = g30_home },
-    { .id_min = 5191, .id_max = 5199, .get = scaling_factors },    // Mach3
-    { .id_min = 5210, .id_max = 5210, .get = g92_offset_applied }, // LinuxCNC
+    { .id_min = 5191, .id_max = 5199, .get = scaling_factors },     // Mach3
+    { .id_min = 5210, .id_max = 5210, .get = g92_offset_applied },  // LinuxCNC
     { .id_min = 5211, .id_max = 5219, .get = g92_offset },
     { .id_min = 5220, .id_max = 5220, .get = coord_system },
-    { .id_min = 5221, .id_max = 5230, .get = coord_system_offset },
-    { .id_min = 5241, .id_max = 5250, .get = coord_system_offset },
-    { .id_min = 5261, .id_max = 5270, .get = coord_system_offset },
-    { .id_min = 5281, .id_max = 5290, .get = coord_system_offset },
-    { .id_min = 5301, .id_max = 5310, .get = coord_system_offset },
-    { .id_min = 5321, .id_max = 5230, .get = coord_system_offset },
-    { .id_min = 5341, .id_max = 5350, .get = coord_system_offset },
-    { .id_min = 5361, .id_max = 5370, .get = coord_system_offset },
-    { .id_min = 5381, .id_max = 5390, .get = coord_system_offset },
-    { .id_min = 5399, .id_max = 5399, .get = m66_result },         // LinuxCNC
-    { .id_min = 5400, .id_max = 5400, .get = tool_number },        // LinuxCNC
-    { .id_min = 5401, .id_max = 5409, .get = tool_offset },        // LinuxCNC
-    { .id_min = 5420, .id_max = 5428, .get = work_position },      // LinuxCNC
-    { .id_min = 5599, .id_max = 5599, .get = debug_output }        // LinuxCNC
+    { .id_min = 5221, .id_max = 5230, .get = coord_system_offset }, // G54
+    { .id_min = 5241, .id_max = 5250, .get = coord_system_offset }, // G55
+    { .id_min = 5261, .id_max = 5270, .get = coord_system_offset }, // G56
+    { .id_min = 5281, .id_max = 5290, .get = coord_system_offset }, // G57
+    { .id_min = 5301, .id_max = 5310, .get = coord_system_offset }, // G58
+    { .id_min = 5321, .id_max = 5330, .get = coord_system_offset }, // G59
+    { .id_min = 5341, .id_max = 5350, .get = coord_system_offset }, // G59.1
+    { .id_min = 5361, .id_max = 5370, .get = coord_system_offset }, // G59.2
+    { .id_min = 5381, .id_max = 5390, .get = coord_system_offset }, // G59.3
+    { .id_min = 5399, .id_max = 5399, .get = m66_result },          // LinuxCNC
+    { .id_min = 5400, .id_max = 5400, .get = tool_number },         // LinuxCNC
+    { .id_min = 5401, .id_max = 5409, .get = tool_offset },         // LinuxCNC
+    { .id_min = 5420, .id_max = 5428, .get = work_position },       // LinuxCNC
+    { .id_min = 5599, .id_max = 5599, .get = debug_output }         // LinuxCNC
 };
 
-bool ngc_param_get (ngc_param_id_t id, float *value)
+FLASHMEM bool ngc_param_get (ngc_param_id_t id, float *value)
 {
     bool found = id > 0 && id < ngc_ro_params[0].id_min;
     uint_fast8_t idx = sizeof(ngc_ro_params) / sizeof(ngc_ro_param_t);
@@ -305,17 +348,17 @@ bool ngc_param_get (ngc_param_id_t id, float *value)
     return found;
 }
 
-bool ngc_param_is_rw (ngc_param_id_t id)
+FLASHMEM bool ngc_param_is_rw (ngc_param_id_t id)
 {
     return id > 0 && id < ngc_ro_params[0].id_min;
 }
 
-bool ngc_param_exists (ngc_param_id_t id)
+FLASHMEM bool ngc_param_exists (ngc_param_id_t id)
 {
     return id > 0 && id <= ngc_ro_params[(sizeof(ngc_ro_params) / sizeof(ngc_ro_param_t)) - 1].id_max;
 }
 
-bool ngc_param_set (ngc_param_id_t id, float value)
+FLASHMEM bool ngc_param_set (ngc_param_id_t id, float value)
 {
     bool ok = id > 0 && id < ngc_ro_params[0].id_min;
 
@@ -409,12 +452,18 @@ PROGMEM static const ngc_named_ro_param_t ngc_named_ro_param[] = {
     { .name = "_selected_pocket",     .id = NGCParam_selected_pocket },
     { .name = "_call_level",          .id = NGCParam_call_level },
     { .name = "_probe_state",         .id = NGCParam_probe_state },
-    { .name = "_toolsetter_state",    .id = NGCParam_toolsetter_state }
+    { .name = "_probe2_state",        .id = NGCParam_probe2_state },
+    { .name = "_toolsetter_state",    .id = NGCParam_toolsetter_state },
+    { .name = "_active_probe",        .id = NGCParam_active_probe },
+    { .name = "_homed_state",         .id = NGCParam_homed_state },
+    { .name = "_homed_axes",          .id = NGCParam_homed_axes },
+    { .name = "_tool_table_size",     .id = NGCParam_tool_table_size },
+    { .name = "_free_memory",         .id = NGCParam_free_memory }
 };
 
 // Named parameters
 
-float ngc_named_param_get_by_id (ncg_name_param_id_t id)
+FLASHMEM float ngc_named_param_get_by_id (ncg_name_param_id_t id)
 {
     float value;
 
@@ -474,10 +523,10 @@ float ngc_named_param_get_by_id (ncg_name_param_id_t id)
 
         case NGCParam_coord_system:
             {
-                uint_fast16_t id = gc_state.modal.coord_system.id * 10;
+                uint_fast16_t id = gc_state.modal.g5x_offset.id * 10;
 
                 if(id > (CoordinateSystem_G59 * 10))
-                    id = (CoordinateSystem_G59 * 10) + gc_state.modal.coord_system.id - CoordinateSystem_G59;
+                    id = (CoordinateSystem_G59 * 10) + gc_state.modal.g5x_offset.id - CoordinateSystem_G59;
 
                 value = (float)(540 + id);
             }
@@ -536,7 +585,7 @@ float ngc_named_param_get_by_id (ncg_name_param_id_t id)
             break;
 
         case NGCParam_feed_override:
-            value = gc_state.modal.override_ctrl.feed_rate_disable ? 0.0f : 1.0f;
+            value = gc_state.modal.override_ctrl.feed_rates_disable ? 0.0f : 1.0f;
             break;
 
         case NGCParam_adaptive_feed:
@@ -572,7 +621,7 @@ float ngc_named_param_get_by_id (ncg_name_param_id_t id)
         case NGCParam_v:
             //no break
         case NGCParam_w:
-            value = _relative_pos(id - NGCParam_x);
+            value = _relative_pos(id - NGCParam_x + 1);
             break;
 
         case NGCParam_abs_x:
@@ -592,7 +641,7 @@ float ngc_named_param_get_by_id (ncg_name_param_id_t id)
         case NGCParam_abs_v:
             //no break
         case NGCParam_abs_w:
-            value = _absolute_pos(id - NGCParam_abs_x);
+            value = _absolute_pos(id - NGCParam_abs_x + 1);
             break;
 
         case NGCParam_current_tool:
@@ -600,7 +649,7 @@ float ngc_named_param_get_by_id (ncg_name_param_id_t id)
             break;
 
         case NGCParam_current_pocket:
-            value = 0.0f;
+            value = (float)grbl.tool_table.get_tool(gc_state.tool->tool_id)->pocket;
             break;
 
         case NGCParam_selected_tool:
@@ -608,7 +657,7 @@ float ngc_named_param_get_by_id (ncg_name_param_id_t id)
             break;
 
         case NGCParam_selected_pocket:
-            value = 0.0f;
+            value = gc_state.tool_pending != gc_state.tool->tool_id ? (float)grbl.tool_table.get_tool(gc_state.tool_pending)->pocket : -1.0f;
             break;
 
         case NGCParam_call_level:
@@ -618,11 +667,39 @@ float ngc_named_param_get_by_id (ncg_name_param_id_t id)
      // grblHAL extensions
 
         case NGCParam_probe_state:
-            value = hal.probe.get_state ? (float)hal.probe.get_state().triggered : -1.0f;
+            value = hal.driver_cap.probe && hal.probe.is_triggered ? (float)hal.probe.is_triggered(Probe_Default) : -1.0f;
+            break;
+
+        case NGCParam_probe2_state:
+            value = hal.driver_cap.probe2 && hal.probe.is_triggered ? (float)hal.probe.is_triggered(Probe_2) : -1.0f;
             break;
 
         case NGCParam_toolsetter_state:
-            value = hal.probe.get_state && hal.driver_cap.toolsetter ? (float)hal.probe.get_state().tls_triggered : -1.0f;
+            value = hal.driver_cap.toolsetter && hal.probe.is_triggered  ? (float)hal.probe.is_triggered(Probe_Toolsetter) : -1.0f;
+            break;
+
+        case NGCParam_active_probe:
+            value = hal.probe.get_state ? (float)hal.probe.get_state().probe_id : -1.0f;
+            break;
+
+        case NGCParam_homed_state:
+            if(sys.homing.mask || settings.homing.flags.single_axis_commands || settings.homing.flags.manual) {
+                axes_signals_t homing = { sys.homing.mask ? sys.homing.mask : AXES_BITMASK };
+                value = (homing.mask & sys.homed.mask) == homing.mask ? 1.0f : 0.0f;
+            } else
+                value = 0.0f;
+            break;
+
+        case NGCParam_homed_axes:
+            value = (float)sys.homed.mask;
+            break;
+
+        case NGCParam_tool_table_size:
+            value = (float)grbl.tool_table.n_tools;
+            break;
+
+        case NGCParam_free_memory:
+            value = hal.get_free_mem ? (float)hal.get_free_mem() / 1024.0f : -1.0f;
             break;
 
         default:
@@ -633,7 +710,7 @@ float ngc_named_param_get_by_id (ncg_name_param_id_t id)
 }
 
 // Lowercase name, remove control characters and spaces
-static char *ngc_name_tolower (char *s)
+FLASHMEM static char *ngc_name_tolower (char *s)
 {
     static char name[NGC_MAX_PARAM_LENGTH + 1];
 
@@ -651,7 +728,7 @@ static char *ngc_name_tolower (char *s)
 	return name;
 }
 
-bool ngc_named_param_get (char *name, float *value)
+FLASHMEM bool ngc_named_param_get (char *name, float *value)
 {
     bool found = false;
     uint_fast8_t idx = sizeof(ngc_named_ro_param) / sizeof(ngc_named_ro_param_t);
@@ -684,14 +761,14 @@ bool ngc_named_param_get (char *name, float *value)
     return found;
 }
 
-bool ngc_named_param_exists (char *name)
+FLASHMEM bool ngc_named_param_exists (char *name)
 {
     float value;
 
     return ngc_named_param_get(name, &value);
 }
 
-bool ngc_named_param_set (char *name, float value)
+FLASHMEM float *ngc_named_param_set (char *name, float value)
 {
     bool ok = false;
     uint_fast8_t idx = sizeof(ngc_named_ro_param) / sizeof(ngc_named_ro_param_t);
@@ -700,7 +777,9 @@ bool ngc_named_param_set (char *name, float value)
 
     // Check if name is supplied, return false if not.
     if((*name == '_' ? *(name + 1) : *name) == '\0')
-        return false;
+        return NULL;
+
+    ngc_named_rw_param_t *rw_param = NULL;
 
     // Check if it is a (read only) predefined parameter.
     if(*name == '_') do {
@@ -712,35 +791,37 @@ bool ngc_named_param_set (char *name, float value)
     if(!ok && (ok = strlen(name) <= NGC_MAX_PARAM_LENGTH)) {
 
         void *context = *name == '_' ? NULL : call_context;
-        ngc_named_rw_param_t *rw_param = rw_global_params, *rw_param_last = rw_global_params;
+        ngc_named_rw_param_t *rw_param_last = rw_global_params;
 
-         while(rw_param) {
-             if(rw_param->context == context && !strcmp(rw_param->name, name)) {
+        rw_param = rw_global_params;
+
+        while(rw_param) {
+            if(rw_param->context == context && !strcmp(rw_param->name, name)) {
                  break;
-             } else {
-                 rw_param_last = rw_param;
-                 rw_param = rw_param->next;
-             }
-         }
+            } else {
+                rw_param_last = rw_param;
+                rw_param = rw_param->next;
+            }
+        }
 
-         if(rw_param == NULL && (rw_param = malloc(sizeof(ngc_named_rw_param_t)))) {
-             strcpy(rw_param->name, name);
-             rw_param->context = context;
-             rw_param->next = NULL;
-             if(rw_global_params == NULL)
-                 rw_global_params = rw_param;
-             else
-                 rw_param_last->next = rw_param;
+        if(rw_param == NULL && (rw_param = malloc(sizeof(ngc_named_rw_param_t)))) {
+            strcpy(rw_param->name, name);
+            rw_param->context = context;
+            rw_param->next = NULL;
+            if(rw_global_params == NULL)
+                rw_global_params = rw_param;
+            else
+                rw_param_last->next = rw_param;
          }
 
          if((ok = rw_param != NULL))
              rw_param->value = value;
-     }
+    }
 
-    return ok;
+    return ok ? &rw_param->value : NULL;
 }
 
-static ngc_string_param_t *sp_get_by_name (char *name)
+FLASHMEM static ngc_string_param_t *sp_get_by_name (char *name)
 {
     ngc_string_param_t *sr = ngc_string_params;
 
@@ -752,7 +833,7 @@ static ngc_string_param_t *sp_get_by_name (char *name)
     return sr;
 }
 
-static ngc_string_param_t *sp_set (ngc_string_id_t id, char *value)
+FLASHMEM static ngc_string_param_t *sp_set (ngc_string_id_t id, char *value)
 {
     size_t len;
     ngc_string_param_t *last = NULL, *sp;
@@ -809,7 +890,7 @@ static ngc_string_param_t *sp_set (ngc_string_id_t id, char *value)
     return sp;
 }
 
-char *ngc_string_param_get (ngc_string_id_t id)
+FLASHMEM char *ngc_string_param_get (ngc_string_id_t id)
 {
     ngc_string_param_t *sp;
 
@@ -821,17 +902,17 @@ char *ngc_string_param_get (ngc_string_id_t id)
     return sp ? sp->value : NULL;
 }
 
-bool ngc_string_param_exists (ngc_string_id_t id)
+FLASHMEM bool ngc_string_param_exists (ngc_string_id_t id)
 {
     return !!ngc_string_param_get(id);
 }
 
-bool ngc_string_param_set (ngc_param_id_t id, char *value)
+FLASHMEM bool ngc_string_param_set (ngc_param_id_t id, char *value)
 {
     return id > 0 && !!sp_set((ngc_string_id_t)id, value);
 }
 
-ngc_string_id_t ngc_string_param_set_name (char *name)
+FLASHMEM ngc_string_id_t ngc_string_param_set_name (char *name)
 {
     ngc_string_param_t *sr = *name ? sp_get_by_name(name) : NULL;
 
@@ -841,7 +922,7 @@ ngc_string_id_t ngc_string_param_set_name (char *name)
     return sr ? sr->id : 0;
 }
 
-void ngc_string_param_delete (ngc_string_id_t id)
+FLASHMEM void ngc_string_param_delete (ngc_string_id_t id)
 {
     ngc_string_param_t *sr = ngc_string_params, *rm;
 
@@ -861,22 +942,26 @@ void ngc_string_param_delete (ngc_string_id_t id)
     }
 }
 
-bool ngc_modal_state_save (gc_modal_t *state, bool auto_restore)
+FLASHMEM bool ngc_modal_state_save (gc_modal_t *state, gc_override_values_t *overrides, float feed_rate, bool auto_restore)
 {
-    gc_modal_t **saved_state = call_level == -1 ? &modal_state : &call_levels[call_level].modal_state;
+    gc_modal_snapshot_t **saved_state = call_level == -1 ? &modal_state : &call_levels[call_level].modal_state;
 
     if(*saved_state == NULL)
-        *saved_state = malloc(sizeof(gc_modal_t));
+        *saved_state = malloc(sizeof(gc_modal_snapshot_t));
 
-    if(*saved_state)
-        memcpy(*saved_state, state, sizeof(gc_modal_t));
+    if(*saved_state) {
+        memcpy(&(*saved_state)->modal, state, sizeof(gc_modal_t));
+        memcpy(&(*saved_state)->override, overrides, sizeof(gc_override_values_t));
+        (*saved_state)->modal.feed_rate = feed_rate;
+        (*saved_state)->modal.auto_restore = auto_restore;
+    }
 
     return *saved_state != NULL;
 }
 
-void ngc_modal_state_invalidate (void)
+FLASHMEM void ngc_modal_state_invalidate (void)
 {
-    gc_modal_t **saved_state = call_level == -1 ? &modal_state : &call_levels[call_level].modal_state;
+    gc_modal_snapshot_t **saved_state = call_level == -1 ? &modal_state : &call_levels[call_level].modal_state;
 
     if(*saved_state) {
         free(*saved_state);
@@ -884,12 +969,17 @@ void ngc_modal_state_invalidate (void)
     }
 }
 
-bool ngc_modal_state_restore (void)
+FLASHMEM gc_modal_snapshot_t *ngc_modal_state_get (void)
+{
+    return call_level == -1 ? modal_state : call_levels[call_level].modal_state;
+}
+
+FLASHMEM bool ngc_modal_state_restore (void)
 {
     return gc_modal_state_restore(call_level == -1 ? modal_state : call_levels[call_level].modal_state);
 }
 
-bool ngc_call_push (void *context)
+FLASHMEM bool ngc_call_push (void *context)
 {
     bool ok;
 
@@ -899,49 +989,49 @@ bool ngc_call_push (void *context)
     return ok;
 }
 
-bool ngc_call_pop (void)
+FLASHMEM bool ngc_call_pop (void)
 {
     if(call_level >= 0) {
 
         if(call_context) {
 
-        ngc_rw_param_t *rw_param = rw_params, *rw_param_last = rw_params;
+            ngc_rw_param_t *rw_param = rw_params, *rw_param_last = rw_params;
 
-        while(rw_param) {
-            if(rw_param->context == call_context) {
-                ngc_rw_param_t *rw_param_free = rw_param;
-                rw_param = rw_param->next;
-                if(rw_param_free == rw_params)
-                    rw_params = rw_param_last = rw_param;
-                else
-                    rw_param_last->next = rw_param;
-                free(rw_param_free);
-            } else {
-                rw_param_last = rw_param;
-                rw_param = rw_param->next;
+            while(rw_param) {
+                if(rw_param->context == call_context) {
+                    ngc_rw_param_t *rw_param_free = rw_param;
+                    rw_param = rw_param->next;
+                    if(rw_param_free == rw_params)
+                        rw_params = rw_param_last = rw_param;
+                    else
+                        rw_param_last->next = rw_param;
+                    free(rw_param_free);
+                } else {
+                    rw_param_last = rw_param;
+                    rw_param = rw_param->next;
+                }
             }
-        }
 
-        ngc_named_rw_param_t *rw_named_param = rw_global_params, *rw_named_param_last = rw_global_params;
+            ngc_named_rw_param_t *rw_named_param = rw_global_params, *rw_named_param_last = rw_global_params;
 
-        while(rw_named_param) {
-            if(rw_named_param->context == call_context) {
-                ngc_named_rw_param_t *rw_named_param_free = rw_named_param;
-                rw_named_param = rw_named_param->next;
-                if(rw_named_param_free == rw_global_params)
-                    rw_global_params = rw_named_param_last = rw_named_param;
-                else
-                    rw_named_param_last->next = rw_named_param;
-                free(rw_named_param_free);
-            } else {
-                rw_named_param_last = rw_named_param;
-                rw_named_param = rw_named_param->next;
+            while(rw_named_param) {
+                if(rw_named_param->context == call_context) {
+                    ngc_named_rw_param_t *rw_named_param_free = rw_named_param;
+                    rw_named_param = rw_named_param->next;
+                    if(rw_named_param_free == rw_global_params)
+                        rw_global_params = rw_named_param_last = rw_named_param;
+                    else
+                        rw_named_param_last->next = rw_named_param;
+                    free(rw_named_param_free);
+                } else {
+                    rw_named_param_last = rw_named_param;
+                    rw_named_param = rw_named_param->next;
+                }
             }
-        }
         }
 
         if(call_levels[call_level].modal_state) {
-            if(call_levels[call_level].modal_state->auto_restore)
+            if(call_levels[call_level].modal_state->modal.auto_restore)
                 gc_modal_state_restore(call_levels[call_level].modal_state);
             free(call_levels[call_level].modal_state);
             call_levels[call_level].modal_state = NULL;
@@ -953,14 +1043,234 @@ bool ngc_call_pop (void)
     return call_level >= 0;
 }
 
-uint_fast8_t ngc_call_level (void)
+FLASHMEM uint_fast8_t ngc_call_level (void)
 {
     return (uint_fast8_t)(call_level + 1);
 }
 
-uint8_t ngc_float_decimals (void)
+FLASHMEM uint8_t ngc_float_decimals (void)
 {
 	return settings.flags.report_inches ? N_DECIMAL_COORDVALUE_INCH : N_DECIMAL_COORDVALUE_MM;
+}
+
+FLASHMEM static status_code_t macro_set_get_setting (parameter_words_t args)
+{
+    float setting_id;
+    status_code_t status = Status_OK;
+    const setting_detail_t *setting;
+
+    if(!args.q)
+        status = Status_GcodeValueWordMissing;
+    else if(ngc_param_get(17 /* Q word */, &setting_id) && (setting = setting_get_details((setting_id_t)setting_id, NULL))) {
+
+        uint_fast8_t offset = (setting_id_t)setting_id - setting->id;
+        bool is_numeric = setting->datatype == Format_Decimal || setting_is_integer(setting) || setting_is_list(setting);
+
+        if(args.s && is_numeric) {
+            float new_value;
+            if(ngc_param_get(19 /* S word */, &new_value))
+                status = settings_store_setting(setting->id + offset, setting->datatype == Format_Decimal ? ftoa(new_value, 6) : uitoa((uint32_t)new_value));
+        }
+
+        if(status == Status_OK) {
+            if(setting->datatype == Format_Decimal) {
+                ngc_named_param_set("_value", setting_get_float_value(setting, offset));
+                ngc_named_param_set("_value_returned", 1.0f);
+            } else if(is_numeric) {
+                ngc_named_param_set("_value", (float)setting_get_int_value(setting, offset));
+                ngc_named_param_set("_value_returned", 1.0f);
+            }
+        }
+    } else
+        status = Status_GcodeValueOutOfRange;
+
+    return status;
+}
+
+FLASHMEM static status_code_t macro_ngc_parameter_rw (parameter_words_t args)
+{
+    float idx, value;
+    status_code_t status = Status_OK;
+
+    if(!args.i)
+        status = Status_GcodeValueWordMissing;
+    else if(ngc_param_get(4 /* I word */, &idx)) {
+        if(args.q) {
+            if(!(ngc_param_get(17 /* Q word */, &value) && ngc_param_set((ngc_param_id_t)idx, value)))
+                status = Status_GcodeValueOutOfRange;
+        } else if(ngc_param_get((ngc_param_id_t)idx, &value)) {
+            if(args.s) {
+                if(!(ngc_param_get(19 /* S word */, &idx) && ngc_param_set((ngc_param_id_t)idx, value)))
+                    status = Status_GcodeValueOutOfRange;
+            } else {
+                ngc_named_param_set("_value", value);
+                ngc_named_param_set("_value_returned", 1.0f);
+            }
+        } else
+            status = Status_GcodeValueOutOfRange;
+    } else
+        status = Status_GcodeValueOutOfRange;
+
+    return status;
+}
+
+FLASHMEM static status_code_t macro_get_machine_state (parameter_words_t args)
+{
+    ngc_named_param_set("_value", (float)ffs(state_get()));
+    ngc_named_param_set("_value_returned", 1.0f);
+
+    return Status_OK;
+}
+
+FLASHMEM static status_code_t macro_select_probe (parameter_words_t args)
+{
+    float probe_id;
+    status_code_t status = Status_OK;
+
+    if(!args.q)
+        status = Status_GcodeValueWordMissing;
+    else if(ngc_param_get(17 /* Q word */, &probe_id) && (hal.probe.select ? hal.probe.select((probe_id_t)probe_id) : probe_id == 0.0f))
+        report_add_realtime(Report_ProbeId);
+    else
+        status = Status_GcodeValueOutOfRange;
+
+    return status;
+}
+
+FLASHMEM static status_code_t macro_get_tool_offset (parameter_words_t args)
+{
+    float tool_id, axis_id;
+    status_code_t status = Status_OK;
+
+    if(!(args.q && args.r))
+        status = Status_GcodeValueWordMissing;
+    else if(grbl.tool_table.n_tools && ngc_param_get(17 /* Q word */, &tool_id) && ngc_param_get(18 /* R word */, &axis_id)) {
+
+        tool_data_t *tool_data = grbl.tool_table.get_tool((tool_id_t)tool_id)->data;
+
+        if(tool_data && (uint8_t)axis_id < N_AXIS) {
+            ngc_named_param_set("_value", tool_data->offset.values[(uint8_t)axis_id]);
+            ngc_named_param_set("_value_returned", 1.0f);
+        } else
+            status = Status_GcodeIllegalToolTableEntry;
+    } else
+        status = Status_GcodeIllegalToolTableEntry;
+
+    return status;
+}
+
+static void modbus_response_handler (modbus_response_t *response)
+{
+    ngc_named_param_set("_value", (float)(response->exception ? response->exception : response->values[0]));
+    ngc_named_param_set("_value_returned", response->exception ? 0.0f : (float)response->num_values);
+    if(response->exception == ModBus_NoException) {
+        if(response->num_values == 2)
+            ngc_named_param_set("_value2", (float)(response->exception ? response->exception : response->values[1]));
+        if(response->num_values == 3)
+            ngc_named_param_set("_value2", (float)(response->exception ? response->exception : response->values[2]));
+    }
+}
+
+FLASHMEM static status_code_t macro_modbus_msg (parameter_words_t args)
+{
+    float tmpvar;
+    status_code_t status = Status_OK;
+
+    if(!(args.f && args.s))
+        status = Status_GcodeValueWordMissing;
+    else if(ngc_param_get(9 /* F word -> function */, &tmpvar)) {
+
+        uint16_t server, address = 0, n_values = 0, values[MODBUS_MAX_REGISTERS];
+
+        const modbus_function_properties_t *p = modbus_get_function_properties((modbus_function_t)tmpvar);
+
+        if(p->function != ModBus_ReadExceptionStatus && p->function && args.r && ngc_param_get(18 /* R word - register address */, &tmpvar)) {
+
+            address = (uint16_t)tmpvar;
+
+            if(p->is_write) {
+
+                if(args.a && ngc_param_get(1 /* A word - first register value */, &tmpvar))
+                    values[n_values++] = (uint16_t)tmpvar;
+
+                if(!p->single_register) {
+                    if(args.b && ngc_param_get(2 /* B word - second register value */, &tmpvar))
+                        values[n_values++] = (uint16_t)tmpvar;
+                    if(args.c && ngc_param_get(3 /* C word - third register value */, &tmpvar))
+                        values[n_values++] = (uint16_t)tmpvar;
+                }
+            } else if(args.x && ngc_param_get(24 /* X word - number of registers to read */, &tmpvar)) {
+                if((n_values = (uint16_t)tmpvar) > MODBUS_MAX_REGISTERS)
+                    return Status_GcodeValueOutOfRange;
+            } else
+                n_values = 1;
+        }
+
+        if((p->function == ModBus_ReadExceptionStatus || n_values) &&
+             args.s && ngc_param_get(19 /* S word - server address */, &tmpvar)) {
+            server = (uint16_t)tmpvar;
+            status = modbus_message(server, p->function, address, values, n_values, modbus_response_handler);
+        } else
+            status = p->function ? Status_GcodeValueWordMissing : Status_GcodeUnsupportedCommand;
+    } else
+        status = Status_GcodeUnsupportedCommand;
+
+    return status;
+}
+
+FLASHMEM static status_code_t onMacroExecute (macro_id_t macro_id, parameter_words_t args, uint32_t repeats)
+{
+    status_code_t status = repeats > 1 && macro_id >= 1 && macro_id <= G65Macro_LastInbuilt
+                   ? Status_GcodeValueOutOfRange
+                   : Status_Unhandled;
+
+    if(status == Status_Unhandled) switch((g65_inbuilt_t)macro_id) {
+
+        case G65Macro_GetSetting:
+            status = macro_set_get_setting(args);
+            break;
+
+       case G65Macro_GetToolOffset:
+            status = macro_get_tool_offset(args);
+            break;
+
+        case G65Macro_ParameterRW:
+            status = macro_ngc_parameter_rw(args);
+            break;
+
+        case G65Macro_GetMachineState:
+            status = macro_get_machine_state(args);
+            break;
+
+        case G65Macro_SelectProbe:
+            status = macro_select_probe(args);
+            break;
+
+        case G65Macro_SpindleDelayDisable:
+            sys.override.control.spindle_wait_disable = On;
+            status = Status_OK;
+            break;
+
+        case G65Macro_ModbusMessage:
+            status = modbus_isup().ok ? macro_modbus_msg(args) : Status_GcodeUnsupportedCommand;
+            break;
+
+    }
+
+    return status == Status_Unhandled && on_macro_execute ? on_macro_execute(macro_id, args, repeats) : status;
+}
+
+FLASHMEM void ngc_params_init (void)
+{
+    static bool init_ok = false;
+
+    if(!init_ok) {
+        init_ok = true;
+        on_macro_execute = grbl.on_macro_execute;
+        grbl.on_macro_execute = onMacroExecute;
+    }
+
+    ngc_modal_state_invalidate();
 }
 
 #endif // NGC_PARAMETERS_ENABLE

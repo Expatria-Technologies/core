@@ -37,21 +37,21 @@ __attribute__((weak)) void stream_passthru_enter (void)
 
 // ****
 
-ISR_CODE static bool ISR_FUNC(forward_usb_rx)(char c)
+ISR_CODE static bool ISR_FUNC(forward_usb_rx)(uint8_t c)
 {
     dest.write_char(c);
 
     return true;
 }
 
-ISR_CODE static bool ISR_FUNC(sink_uart_rx)(char c)
+ISR_CODE static bool ISR_FUNC(sink_uart_rx)(uint8_t c)
 {
     return true;
 }
 
 static void forward_uart_rx (void *data)
 {
-    static char buf[64];
+    static uint8_t buf[64];
     static uint_fast8_t idx = 0;
 
     int16_t c;
@@ -62,7 +62,7 @@ static void forward_uart_rx (void *data)
         *buf = c;
 
         while(idx < sizeof(buf) && (c = dest.read()) != SERIAL_NO_DATA)
-            buf[idx++] = c;
+            buf[idx++] = (uint8_t)c;
 
         hal.stream.write_n(buf, idx);
     }
@@ -83,14 +83,14 @@ static void onLinestateChanged (serial_linestate_t state)
     if(conn_ok) {
 
         if(state.dtr == state.rts) {
-            hal.port.digital_out(boot0_port, 0);
-            hal.port.digital_out(reset_port, 1);
+            ioport_digital_out(boot0_port, 0);
+            ioport_digital_out(reset_port, 1);
         } else if(state.dtr) {
-            hal.port.digital_out(reset_port, 0);
-            hal.port.digital_out(boot0_port, 0);
+            ioport_digital_out(reset_port, 0);
+            ioport_digital_out(boot0_port, 0);
         } else {
-            hal.port.digital_out(boot0_port, 0);
-            hal.port.digital_out(reset_port, 1);
+            ioport_digital_out(boot0_port, 0);
+            ioport_digital_out(reset_port, 1);
         }
     }
 }
@@ -98,7 +98,7 @@ static void onLinestateChanged (serial_linestate_t state)
 static void passthru_start2 (void *data)
 {
     conn_ok = true;
-    hal.port.digital_out(reset_port, 1);
+    ioport_digital_out(reset_port, 1);
 
     task_add_delayed(forward_uart_rx, NULL, 8);
 
@@ -108,8 +108,8 @@ static void passthru_start2 (void *data)
 
 static void passthru_start1 (void *data)
 {
-    hal.port.digital_out(boot0_port, 1);
-    hal.port.digital_out(reset_port, 0);
+    ioport_digital_out(boot0_port, 1);
+    ioport_digital_out(reset_port, 0);
 
     on_linestate_changed = hal.stream.on_linestate_changed;
     hal.stream.on_linestate_changed = onLinestateChanged;

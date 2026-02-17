@@ -5,7 +5,7 @@
   io_expanders_init() should be called at the end of the drivers driver_init() implementation,
   just before the driver claims ports.
 
-  These are NOT referenced in the core grbl code
+  These are NOT referenced in the core grblHAL code
 
   Part of grblHAL
 
@@ -63,22 +63,37 @@ extern void pca9654e_init(void);
 
 // ModBus expanders
 
+#if PICOHAL_IO_ENABLE || R4SLS08_ENABLE
 
+#if !defined(MODBUS_ENABLE) || !(MODBUS_ENABLE & MODBUS_RTU_ENABLED)
+#error "Enabled IO expander(s) require Modbus RTU!"
+#endif
+
+#if R4SLS08_ENABLE
+extern void r4sls08_init (void);
+#endif
+
+// Third party Modbus expander plugins goes after this line
 
 #if PICOHAL_IO_ENABLE
-
-#if !MODBUS_ENABLE
-#error "Modbus must be enabled to use the Picohal IO expander!"
-#endif
-
 extern void picohal_io_init (void);
 #endif
+
+#endif // ModBus expanders
 
 // CANBus expanders
 
 //
 
 // Other expanders
+
+#if THCAD2_ENABLE
+    extern void thcad2_init (void);
+#endif
+
+#if FNC_EXPANDER_ENABLE
+    void fnc_expander_init (void);
+#endif
 
 //
 
@@ -94,6 +109,10 @@ static inline void io_expanders_init (void)
     mcp4725_init();
 #endif
 
+#if R4SLS08_ENABLE
+    r4sls08_init();
+#endif
+
 #if PCA9654E_ENABLE
     pca9654e_init();
 #endif
@@ -102,4 +121,11 @@ static inline void io_expanders_init (void)
     picohal_io_init();
 #endif
 
+#if FNC_EXPANDER_ENABLE
+    fnc_expander_init();
+#endif
+
+#if THCAD2_ENABLE
+    thcad2_init();
+#endif
 }

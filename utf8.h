@@ -1,11 +1,11 @@
 /*
-  override.h - An embedded CNC Controller with rs274/ngc (g-code) support
-
-  Buffer handlers for real-time override commands
+  utf8.c - An embedded CNC Controller with rs274/ngc (g-code) support
 
   Part of grblHAL
 
-  Copyright (c) 2016-2023 Terje Io
+  Copyright (c) 2025 Terje Io
+
+  utf32_to_utf8() is Copyright 2025 Kang-Che Sung, see license in utf8.c.
 
   grblHAL is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -21,19 +21,4 @@
   along with grblHAL. If not, see <http://www.gnu.org/licenses/>.
 */
 
-#ifndef _OVERRIDE_H_
-#define _OVERRIDE_H_
-
-#ifndef OVERRIDE_BUFSIZE
-#define OVERRIDE_BUFSIZE 16 // must be a power of 2
-#endif
-
-void flush_override_buffers ();
-void enqueue_feed_override (uint8_t cmd);
-uint8_t get_feed_override (void);
-void enqueue_spindle_override (uint8_t cmd);
-uint8_t get_spindle_override (void);
-void enqueue_coolant_override (uint8_t cmd);
-uint8_t get_coolant_override (void);
-
-#endif
+uint16_t utf32_to_utf8 (uint8_t *buffer, uint32_t code_point);

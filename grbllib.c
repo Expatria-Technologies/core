@@ -3,7 +3,7 @@
 
   Part of grblHAL
 
-  Copyright (c) 2017-2025 Terje Io
+  Copyright (c) 2017-2026 Terje Io
   Copyright (c) 2011-2015 Sungeun K. Jeon
   Copyright (c) 2009-2011 Simen Svale Skogsrud
 
@@ -95,6 +95,7 @@ static driver_startup_t driver = { .ok = 0xFF };
 static core_task_t *next_task = NULL, *immediate_task = NULL, *on_booted = NULL, *systick_task = NULL, *last_freed = NULL;
 static on_linestate_changed_ptr on_linestate_changed;
 static settings_changed_ptr hal_settings_changed;
+static stepper_enable_ptr stepper_enable;
 
 #ifdef KINEMATICS_API
 kinematics_t kinematics;
@@ -103,6 +104,27 @@ kinematics_t kinematics;
 __attribute__((weak)) void board_ports_init (void)
 {
     // NOOP
+}
+
+__attribute__((always_inline)) static inline void task_free (core_task_t *task)
+{
+    task->fn = NULL;
+    task->next = NULL;
+    if(last_freed == NULL)
+        last_freed = task;
+}
+
+__attribute__((always_inline)) static inline core_task_t *task_run (core_task_t *task)
+{
+    core_task_t *t = task;
+    foreground_task_ptr fn = task->fn;
+    void *data = task->data;
+
+    task = task->next;
+    task_free(t);
+    fn(data);
+
+    return task;
 }
 
 void dummy_bool_handler (bool arg)
@@ -122,7 +144,7 @@ static bool dummy_irq_claim (irq_type_t irq, uint_fast8_t id, irq_callback_ptr c
     return false;
 }
 
-static void report_driver_error (void *data)
+FLASHMEM static void report_driver_error (void *data)
 {
     char msg[40];
 
@@ -174,12 +196,12 @@ ISR_CODE static home_signals_t ISR_FUNC(get_homing_status2)(void)
     return home;
 }
 
-static void output_welcome_message (void *data)
+FLASHMEM static void output_welcome_message (void *data)
 {
     grbl.report.init_message(hal.stream.write);
 }
 
-static void onLinestateChanged (serial_linestate_t state)
+FLASHMEM static void onLinestateChanged (serial_linestate_t state)
 {
     if(state.dtr) {
         task_delete(output_welcome_message, NULL);
@@ -190,7 +212,47 @@ static void onLinestateChanged (serial_linestate_t state)
         on_linestate_changed(state);
 }
 
-static void settings_changed (settings_t *settings, settings_changed_flags_t changed)
+FLASHMEM static void stepperEnable (axes_signals_t enable, bool hold)
+{
+    if(stepper_enable)
+        stepper_enable(enable, hold);
+
+    sys.steppers_enabled = /*!hold &&*/ enable.bits == AXES_BITMASK;
+}
+
+FLASHMEM static void print_pos_msg (void *data)
+{
+    hal.stream.write("grblHAL: power on self-test (POS) failed!" ASCII_EOL);
+
+    if(on_booted) do {
+    } while((on_booted = task_run(on_booted)));
+}
+
+FLASHMEM static void onPosFailure (serial_linestate_t state)
+{
+    if(state.dtr) // delay a bit to let the USB stack come up
+        task_add_delayed(print_pos_msg, NULL, 50);
+}
+
+FLASHMEM static bool onProbeToolsetter (tool_data_t *tool, coord_data_t *position, bool at_g59_3, bool on)
+{
+    bool ok = false;
+
+    if(at_g59_3 && settings.probe.toolsetter_auto_select)
+        ok = hal.probe.select(on ? Probe_Toolsetter : Probe_Default);
+
+    return ok;
+}
+
+FLASHMEM static void tool_changed (tool_data_t *tool)
+{
+    if(settings.flags.tool_persistent && tool->tool_id != settings.tool_id) {
+        settings.tool_id = tool->tool_id;
+        settings_write_global();
+    }
+}
+
+FLASHMEM static void settings_changed (settings_t *settings, settings_changed_flags_t changed)
 {
     hal_settings_changed(settings, changed);
 
@@ -198,9 +260,14 @@ static void settings_changed (settings_t *settings, settings_changed_flags_t cha
         grbl.on_settings_changed(settings, changed);
 }
 
+FLASHMEM static atc_status_t atc_get_state (void)
+{
+    return hal.driver_cap.atc ? ATC_Online : ATC_None;
+}
+
 // main entry point
 
-int grbl_enter (void)
+FLASHMEM int grbl_enter (void)
 {
     assert(NVS_ADDR_PARAMETERS + N_CoordinateSystems * (sizeof(coord_data_t) + NVS_CRC_BYTES) < NVS_ADDR_STARTUP_BLOCK);
     assert(NVS_ADDR_STARTUP_BLOCK + N_STARTUP_LINE * (sizeof(stored_line_t) + NVS_CRC_BYTES) < NVS_ADDR_BUILD_INFO);
@@ -220,6 +287,7 @@ int grbl_enter (void)
     grbl.on_get_alarms = alarms_get_details;
     grbl.on_get_errors = errors_get_details;
     grbl.on_get_settings = settings_get_details;
+    grbl.on_tool_changed = tool_changed;
 #if NGC_EXPRESSIONS_ENABLE
     grbl.on_process_gcode_comment = ngc_process_comment;
 #endif
@@ -238,16 +306,12 @@ int grbl_enter (void)
     hal.control.interrupt_callback = control_interrupt_handler;
     hal.stepper.interrupt_callback = stepper_driver_interrupt_handler;
     hal.stream_blocking_callback = stream_tx_blocking;
-    hal.signals_cap.reset = hal.signals_cap.feed_hold = hal.signals_cap.cycle_start = On;
+    hal.tool.atc_get_state = atc_get_state;
     hal.signals_pullup_disable_cap.value = (uint16_t)-1;
 
     sys.cold_start = true;
 
     limits_init();
-
-#if NVSDATA_BUFFER_ENABLE
-    nvs_buffer_alloc(); // Allocate memory block for NVS buffer
-#endif
 
     settings_clear();
     report_init_fns();
@@ -257,6 +321,10 @@ int grbl_enter (void)
 #endif
 
     driver.init = driver_init();
+
+#if NVSDATA_BUFFER_ENABLE
+    nvs_buffer_alloc(); // Allocate memory block for NVS buffer
+#endif
 
 #ifdef DEBUGOUT
     debug_stream_init();
@@ -295,7 +363,10 @@ int grbl_enter (void)
 
 // check and configure driver
 
-#ifdef ADAPTIVE_MULTI_AXIS_STEP_SMOOTHING
+    stepper_enable = hal.stepper.enable;
+    hal.stepper.enable = stepperEnable;
+
+#if ADAPTIVE_MULTI_AXIS_STEP_SMOOTHING
     driver.amass = hal.driver_cap.amass_level >= MAX_AMASS_LEVEL;
     hal.driver_cap.amass_level = MAX_AMASS_LEVEL;
 #else
@@ -343,6 +414,9 @@ int grbl_enter (void)
     } else
         driver.spindle = spindle_select(spindle_add_null());
 
+    if(!hal.driver_cap.sd_card)
+        settings.macro_atc_flags.error_on_no_macro = Off;
+
     if(driver.ok != 0xFF) {
         sys.alarm = Alarm_SelftestFailed;
         task_run_on_startup(report_driver_error, NULL);
@@ -350,7 +424,7 @@ int grbl_enter (void)
 
     hal.stepper.enable(settings.steppers.energize, true);
 
-    spindle_all_off();
+    spindle_all_off(true);
     hal.coolant.set_state((coolant_state_t){0});
 
     if(hal.get_position)
@@ -370,16 +444,22 @@ int grbl_enter (void)
         task_add_delayed(auto_realtime_report, NULL, settings.report_interval);
 
     if(hal.driver_cap.sd_card || hal.driver_cap.littlefs) {
-        fs_options_t fs_options = {0};
+        fs_options_t fs_options = { .hierarchical_listing = On };
         fs_options.lfs_hidden = hal.driver_cap.littlefs;
         fs_options.sd_mount_on_boot = hal.driver_cap.sd_card;
-        setting_remove_elements(Setting_FSOptions, fs_options.mask);
+        setting_remove_elements(Setting_FSOptions, fs_options.mask, true);
     }
 
     if(hal.stream.state.linestate_event && !hal.stream.state.passthru) {
         on_linestate_changed = hal.stream.on_linestate_changed;
         hal.stream.on_linestate_changed = onLinestateChanged;
     }
+
+    if(grbl.on_probe_toolsetter == NULL && hal.driver_cap.toolsetter && hal.probe.select)
+        grbl.on_probe_toolsetter = onProbeToolsetter;
+
+    if(hal.driver_cap.probe && hal.signals_cap.probe_disconnected)
+        task_run_on_startup(probe_connected_event, hal.control.get_state().probe_disconnected ? NULL : (void *)1);
 
     // Initialization loop upon power-up or a system abort. For the latter, all processes
     // will return to this loop to be cleanly re-initialized.
@@ -390,14 +470,18 @@ int grbl_enter (void)
         // Reset report entry points
         report_init_fns();
 
+        overrides_t override;
+
+        memcpy(&override, &sys.override, sizeof(overrides_t));
+
         if(!sys.position_lost || settings.homing.flags.keep_on_reset)
             memset(&sys, 0, offsetof(system_t, homed)); // Clear system variables except alarm & homed status.
         else
             memset(&sys, 0, offsetof(system_t, alarm)); // Clear system variables except state & alarm.
 
-        sys.var5399 = -2;                                        // Clear last M66 result
-        sys.override.feed_rate = DEFAULT_FEED_OVERRIDE;          // Set to 100%
-        sys.override.rapid_rate = DEFAULT_RAPID_OVERRIDE;        // Set to 100%
+        sys.var5399 = -2;                               // Clear last M66 result
+        sys.override.feed_rate = sys.cold_start || !settings.flags.keep_feed_override_on_reset ? DEFAULT_FEED_OVERRIDE : override.feed_rate;
+        sys.override.rapid_rate = sys.cold_start || !settings.flags.keep_rapids_override_on_reset ? DEFAULT_RAPID_OVERRIDE : override.rapid_rate;
         do {
             if(spindle_is_enabled(--spindle_num))
                 spindle_get(spindle_num)->param->override_pct = DEFAULT_SPINDLE_RPM_OVERRIDE; // Set to 100%
@@ -460,27 +544,6 @@ __attribute__((always_inline)) static inline core_task_t *task_alloc (void)
         if(task_pool[--idx].fn == NULL)
             task = &task_pool[idx];
     } while(task == NULL && idx);
-
-    return task;
-}
-
-__attribute__((always_inline)) static inline void task_free (core_task_t *task)
-{
-    task->fn = NULL;
-    task->next = NULL;
-    if(last_freed == NULL)
-        last_freed = task;
-}
-
-__attribute__((always_inline)) static inline core_task_t *task_run (core_task_t *task)
-{
-    core_task_t *t = task;
-    foreground_task_ptr fn = task->fn;
-    void *data = task->data;
-
-    task = task->next;
-    task_free(t);
-    fn(data);
 
     return task;
 }
@@ -581,7 +644,7 @@ ISR_CODE void task_delete (foreground_task_ptr fn, void *data)
     hal.irq_disable();
 
     if((task = next_task)) do {
-        if(fn == task->fn && data == task->data) {
+        if(fn == task->fn && (data == NULL || data == task->data)) {
             if(prev)
                 prev->next = task->next;
             else
@@ -622,7 +685,7 @@ ISR_CODE bool ISR_FUNC(task_add_systick)(foreground_task_ptr fn, void *data)
     return task != NULL;
 }
 
-void task_delete_systick (foreground_task_ptr fn, void *data)
+FLASHMEM void task_delete_systick (foreground_task_ptr fn, void *data)
 {
     core_task_t *task, *prev = NULL;
 
@@ -713,11 +776,48 @@ ISR_CODE bool ISR_FUNC(task_run_on_startup)(foreground_task_ptr fn, void *data)
 }
 
 // for core use only, called once from protocol.c on cold start
-void task_execute_on_startup (void)
+FLASHMEM void task_execute_on_startup (void)
 {
-    if(on_booted) do {
+    if(!sys.driver_started) {
+
+        // Clear task queues except startup warnings.
+
+        core_task_t *task, *prev = NULL;
+
+        if((task = on_booted)) do {
+            if(!(task->fn == report_warning)) {
+                if(prev)
+                    prev->next = task->next;
+                else {
+                    prev = NULL;
+                    on_booted = task->next;
+                }
+                task_free(task);
+            } else
+                prev = task;
+        } while((task = prev ? prev->next : on_booted));
+
+        while(next_task)
+            task_delete(next_task->fn, NULL);
+
+        while(systick_task)
+            task_delete_systick(systick_task->fn, NULL);
+    }
+
+    if(on_booted && (sys.driver_started || !hal.stream.state.linestate_event)) do {
     } while((on_booted = task_run(on_booted)));
 
-    if(!sys.driver_started)
-        while(true);
+    if(!sys.driver_started) {
+
+        if(hal.stream.state.linestate_event)
+            hal.stream.on_linestate_changed = onPosFailure;
+
+        while(true)
+            grbl.on_execute_realtime(state_get());
+    }
+}
+
+FLASHMEM void task_raise_alarm (void *data)
+{
+    system_raise_alarm((alarm_code_t)data);
 }

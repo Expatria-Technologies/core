@@ -29,12 +29,32 @@ axes_signals_t xbar_fn_to_axismask (pin_function_t fn)
 
     switch(fn) {
 
+        case Output_StepperEnable:
+            mask.bits = AXES_BITMASK;
+            break;
+
+        case Output_StepperEnableXY:
+            mask.x = mask.y = On;
+            break;
+
+#if defined(A_AXIS) || defined(B_AXIS)
+        case Output_StepperEnableAB:
+#ifdef A_AXIS
+            mask.a = On;
+#endif
+#ifdef B_AXIS
+            mask.b = On;
+#endif
+            break;
+#endif
+
         case Input_LimitX:
         case Input_LimitX_Max:
         case Input_LimitX_2:
         case Input_HomeX:
         case Input_MotorFaultX:
         case Input_MotorFaultX_2:
+        case Output_StepperEnableX:
             mask.x = On;
             break;
 
@@ -44,6 +64,7 @@ axes_signals_t xbar_fn_to_axismask (pin_function_t fn)
         case Input_HomeY:
         case Input_MotorFaultY:
         case Input_MotorFaultY_2:
+        case Output_StepperEnableY:
             mask.y = On;
             break;
 
@@ -53,50 +74,64 @@ axes_signals_t xbar_fn_to_axismask (pin_function_t fn)
         case Input_HomeZ:
         case Input_MotorFaultZ:
         case Input_MotorFaultZ_2:
+        case Output_StepperEnableZ:
             mask.z = On;
             break;
 
-#if N_AXIS > 3
+#ifdef A_AXIS
         case Input_LimitA:
         case Input_LimitA_Max:
         case Input_HomeA:
         case Input_MotorFaultA:
+        case Output_StepperEnableA:
             mask.a = On;
             break;
 #endif
-#if N_AXIS > 4
+#ifdef B_AXIS
         case Input_LimitB:
         case Input_LimitB_Max:
         case Input_HomeB:
         case Input_MotorFaultB:
+        case Output_StepperEnableB:
             mask.b = On;
             break;
 #endif
-#if N_AXIS > 5
+#ifdef C_AXIS
         case Input_LimitC:
         case Input_LimitC_Max:
         case Input_HomeC:
         case Input_MotorFaultC:
+        case Output_StepperEnableC:
             mask.c = On;
             break;
 #endif
-#if N_AXIS > 6
+#ifdef U_AXIS
         case Input_LimitU:
         case Input_LimitU_Max:
         case Input_HomeU:
         case Input_MotorFaultU:
+        case Output_StepperEnableU:
             mask.u = On;
             break;
 #endif
-#if N_AXIS == 8
+#ifdef V_AXIS
         case Input_LimitV:
         case Input_LimitV_Max:
         case Input_HomeV:
         case Input_MotorFaultV:
+        case Output_StepperEnableV:
             mask.v = On;
             break;
 #endif
-
+#ifdef W_AXIS
+        case Input_LimitW:
+        case Input_LimitW_Max:
+        case Input_HomeW:
+        case Input_MotorFaultW:
+        case Output_StepperEnableW:
+            mask.w = On;
+            break;
+#endif
         default:
             break;
     }
@@ -152,6 +187,12 @@ const char *xbar_fn_to_pinname (pin_function_t fn)
     return name ? name : "N/A";
 }
 
+// Only returns description for UART groups
+const char *xbar_group_to_description ( pin_group_t group)
+{
+    return group >= PinGroup_UART && group <= PinGroup_UART4 ? (const char * const[]){ "UART1", "UART2", "UART3", "UART4" }[group - PinGroup_UART] : NULL;
+}
+
 control_signals_t xbar_fn_to_signals_mask (pin_function_t fn)
 {
     control_signals_t signals;
@@ -159,4 +200,9 @@ control_signals_t xbar_fn_to_signals_mask (pin_function_t fn)
     signals.mask = fn >= Input_Probe ? 0 : 1 << (uint32_t)fn;
 
     return signals;
+}
+
+const char *xbar_resolution_to_string (pin_cap_t cap)
+{
+    return !cap.analog || cap.pwm || cap.servo_pwm ? "?" : ((const char * const[]){"4", "8", "10", "12", "14", "16", "18", "20", "24", "32"})[cap.resolution];
 }

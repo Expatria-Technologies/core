@@ -193,10 +193,33 @@ typedef union {
     };
 } io_port_cando_t;
 
+struct ioports_cfg;
+struct ioports_handle; // members defined in ioports.c
+
+typedef status_code_t (*ioport_set_value_ptr)(struct ioports_cfg *p, uint8_t *port, pin_cap_t caps, float value);
+typedef float (*ioport_get_value_ptr)(struct ioports_cfg *p, uint8_t port);
+typedef uint8_t (*ioport_get_next_ptr)(struct ioports_cfg *p, uint8_t port, const char *description, pin_cap_t caps);
+typedef xbar_t *(*ioport_claim_ptr)(struct ioports_cfg *p, uint8_t *port, const char *description, pin_cap_t caps);
+
+struct ioports_cfg {
+    struct ioports_handle *handle;
+    uint8_t n_ports;
+    uint8_t port_max;
+    const char port_maxs[4];
+    ioport_get_value_ptr get_value;
+    ioport_set_value_ptr set_value;
+    ioport_get_next_ptr get_next;
+    ioport_claim_ptr claim;
+};
+
+typedef struct ioports_cfg io_port_cfg_t;
+
+io_port_cfg_t *ioports_cfg (io_port_cfg_t *p, io_port_type_t type, io_port_direction_t dir);
 uint8_t ioports_available (io_port_type_t type, io_port_direction_t dir);
 uint8_t ioports_unclaimed (io_port_type_t type, io_port_direction_t dir);
 xbar_t *ioport_get_info (io_port_type_t type, io_port_direction_t dir, uint8_t port);
 xbar_t *ioport_claim (io_port_type_t type, io_port_direction_t dir, uint8_t *port, const char *description);
+bool ioport_claimable (io_port_type_t type, io_port_direction_t dir, uint8_t port);
 io_port_cando_t ioports_can_do (void);
 uint8_t ioport_find_free (io_port_type_t type, io_port_direction_t dir, pin_cap_t filter, const char *description);
 bool ioports_enumerate (io_port_type_t type, io_port_direction_t dir, pin_cap_t filter, ioports_enumerate_callback_ptr callback, void *data);
@@ -269,6 +292,7 @@ typedef struct {
 bool ioports_add_analog (io_analog_t *ports);
 bool ioports_add_digital (io_digital_t *ports);
 void ioports_add_settings (driver_settings_load_ptr settings_loaded, setting_changed_ptr setting_changed);
+bool ioport_remap (io_port_type_t type, io_port_direction_t dir, uint8_t from, uint8_t to);
 void ioport_save_input_settings (xbar_t *xbar, gpio_in_config_t *config);
 void ioport_save_output_settings (xbar_t *xbar, gpio_out_config_t *config);
 void ioport_setting_changed (setting_id_t id);

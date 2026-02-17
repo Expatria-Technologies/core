@@ -3,7 +3,7 @@
 
   Part of grblHAL
 
-  Copyright (c) 2017-2025 Terje Io
+  Copyright (c) 2017-2026 Terje Io
   Copyright (c) 2011-2016 Sungeun K. Jeon for Gnea Research LLC
   Copyright (c) 2009-2011 Simen Svale Skogsrud
 
@@ -26,6 +26,7 @@
 
 #include "config.h"
 #include "system.h"
+#include "stream.h"
 #include "plugins.h"
 
 // Version of the persistent storage data. Always stored in byte 0 of non-volatile storage.
@@ -456,6 +457,14 @@ typedef enum {
     Setting_MacroATC_Options = 675,
     Setting_ResetActions = 676,
     Setting_StepperSpindle_Options = 677,
+    Setting_RelayPortToolsetter = 678,
+    Setting_RelayPortProbe2 = 679,
+    Setting_StepperEnableDelay = 680,
+    Setting_ModBus_StreamFormat = 681,
+    Setting_THC_FeedFactor = 682,
+    // 683 - 689 - reserved for Sienci
+
+    Setting_SubroutineOptions = 700,
 
     Setting_SpindlePWMOptions1 = 709,
 
@@ -504,10 +513,11 @@ typedef enum {
     Setting_ActionPort8    = 768,
     Setting_ActionPort9    = 769,
 
-    Setting_SpindleOffsetX = 770,
-    Setting_SpindleOffsetY = 771,
+    Setting_SpindleOffsetX       = 770,
+    Setting_SpindleOffsetY       = 771,
+    Setting_SpindleOffsetOptions = 772,
 //
-// 772-779 - reserved for spindle offset settings
+// 773-779 - reserved for spindle offset settings
 //
 
 // Reserving settings in the range 800 - 899 for axis settings.
@@ -594,7 +604,11 @@ typedef union {
                  keep_offsets_on_reset           :1,
                  tool_change_at_g30              :1,
                  tool_change_fast_pulloff        :1,
-         		 unassigned                      :12;
+                 tool_persistent                 :1,
+                 keep_rapids_override_on_reset   :1,
+                 keep_feed_override_on_reset     :1,
+                 m98_prescan_enable              :1,
+         		 unassigned                      :8;
     };
 } settingflags_t;
 
@@ -610,7 +624,10 @@ typedef union {
                  invert_toolsetter_input   :1,
                  disable_toolsetter_pullup :1,
                  soft_limited              :1,
-                 unassigned                :7;
+                 toolsetter_auto_select    :1,
+                 invert_probe2_input       :1,
+                 probe2_auto_select        :1,
+                 unassigned                :4;
     };
 } probeflags_t;
 
@@ -630,7 +647,8 @@ typedef union {
                  alarm_substate     :1,
                  run_substate       :1,
                  when_homing        :1,
-                 unassigned         :3;
+                 distance_to_go     :1,
+                 unassigned         :2;
     };
 } reportmask_t;
 
@@ -645,8 +663,8 @@ typedef union {
 
 typedef struct {
     safety_door_setting_flags_t flags; // TODO: move to last element in next revision
-    float spindle_on_delay; // TODO: change to uint16_t in next revision
-    float coolant_on_delay; // TODO: change to uint16_t in next revision
+    float spindle_on_delay; // TODO: change to uint16_t and move to parking_setting_flags_t in next revision
+    float coolant_on_delay; // TODO: change to uint16_t and move to parking_setting_flags_t in next revision
 } safety_door_settings_t;
 
 typedef union {
@@ -675,17 +693,18 @@ typedef struct {
 typedef union {
     uint16_t value;
     struct {
-        uint16_t enabled              :1,
-                 single_axis_commands :1,
-                 init_lock            :1,
-                 force_set_origin     :1,
-                 two_switches         :1, // -> limits.flags.two_switches, never set
-                 manual               :1,
-                 override_locks       :1,
-                 keep_on_reset        :1,
-                 use_limit_switches   :1,
-                 per_axis_feedrates   :1,
-                 unused               :6;
+        uint16_t enabled                 :1,
+                 single_axis_commands    :1,
+                 init_lock               :1,
+                 force_set_origin        :1,
+                 two_switches            :1, // -> limits.flags.two_switches, never set
+                 manual                  :1,
+                 override_locks          :1,
+                 keep_on_reset           :1,
+                 use_limit_switches      :1,
+                 per_axis_feedrates      :1,
+                 nx_scrips_on_homed_only :1,
+                 unused                  :5;
     };
 } homing_settings_flags_t;
 
@@ -757,9 +776,10 @@ typedef union {
     uint8_t value;
     uint8_t mask;
     struct {
-        uint8_t sd_mount_on_boot  :1,
-                lfs_hidden        :1,
-                unused            :6;
+        uint8_t sd_mount_on_boot     :1,
+                lfs_hidden           :1,
+                hierarchical_listing :1,
+                unused               :5;
     };
 } fs_options_t;
 
@@ -837,10 +857,17 @@ typedef union {
     uint8_t value;
     struct {
         uint8_t execute_m6t0       :1,
+                error_on_no_macro  :1,
                 random_toolchanger :1,
-                unassigned         :6;
+                unassigned         :5;
     };
 } macro_atc_flags_t;
+
+typedef struct {
+    uint8_t baud_rate;
+    uint8_t stream_format;
+    uint8_t rx_timeout;
+} modbus_rtu_settings_t;
 
 typedef union {
     uint32_t value;
@@ -867,7 +894,7 @@ typedef struct {
     control_signals_t control_disable_pullup;
     axes_signals_t home_invert;
     coolant_settings_t coolant;
-    uint8_t modbus_baud;
+    uint8_t modbus_baud; // TODO: replace with modbus_rtu_settings_t modbus; in next version
     uint8_t canbus_baud;
     spindle_settings_t spindle;
     spindle_pwm_settings_t pwm_spindle;
@@ -890,7 +917,10 @@ typedef struct {
     axes_signals_t motor_fault_invert;
     macro_atc_flags_t macro_atc_flags;
     stepper_spindle_settings_flags_t stepper_spindle_flags;
-    char reserved[18];          // Reserved For future expansion
+    uint16_t stepper_enable_delay; // Move to stepper_settings_t
+    tool_id_t tool_id;
+    serial_format_t modbus_stream_format; // TODO: remove in next version
+    char reserved[9];             // Reserved For future expansion
 } settings_t;
 
 typedef enum {
@@ -942,21 +972,12 @@ typedef enum {
     Group_XAxis = Group_Axis0,  //!< 44
     Group_YAxis,                //!< 45
     Group_ZAxis,                //!< 46
-#ifdef A_AXIS
     Group_AAxis,                //!< 47
-#endif
-#ifdef B_AXIS
     Group_BAxis,                //!< 48
-#endif
-#ifdef C_AXIS
     Group_CAxis,                //!< 49
-#endif
-#ifdef U_AXIS
     Group_UAxis,                //!< 50
-#endif
-#ifdef V_AXIS
     Group_VAxis,                //!< 51
-#endif
+    Group_WAxis,                //!< 52
     Group_Unknown = 99,         //!< 99
     Group_All = Group_Root      //!< 0
 } setting_group_t;
@@ -1060,6 +1081,7 @@ typedef void (*driver_settings_load_ptr)(void);
 typedef void (*driver_settings_save_ptr)(void);
 typedef void (*driver_settings_restore_ptr)(void);
 typedef bool (*driver_settings_iterator_ptr)(const setting_detail_t *setting, setting_output_ptr callback, void *data);
+typedef setting_id_t (*driver_settings_normalize_ptr)(setting_id_t id);
 
 typedef struct setting_details {
     const bool is_core;
@@ -1067,10 +1089,8 @@ typedef struct setting_details {
     const setting_group_detail_t *groups;
     const uint16_t n_settings;
     const setting_detail_t *settings;
-#ifndef NO_SETTINGS_DESCRIPTIONS
     const uint16_t n_descriptions;
     const setting_descr_t *descriptions;
-#endif
 //    struct setting_details *(*on_get_settings)(void);
     struct setting_details *next;
     settings_changed_ptr on_changed;
@@ -1078,6 +1098,7 @@ typedef struct setting_details {
     driver_settings_load_ptr load;
     driver_settings_restore_ptr restore;
     driver_settings_iterator_ptr iterator;
+    driver_settings_normalize_ptr normalize;
 } setting_details_t;
 
 // NOTE: this must match the signature of on_get_settings in the setting_details_t structure above!
@@ -1091,7 +1112,7 @@ void settings_clear (void);
 // Initialize the configuration subsystem (load settings from persistent storage)
 void settings_init();
 
-// Write Grbl global settings and version number to persistent storage
+// Write grblHAL global settings and version number to persistent storage
 void settings_write_global(void);
 
 // Helper function to clear and restore persistent storage defaults
@@ -1113,10 +1134,10 @@ void settings_write_build_info(char *line);
 bool settings_read_build_info(char *line);
 
 // Writes selected coordinate data to persistent storage
-void settings_write_coord_data(coord_system_id_t id, float (*coord_data)[N_AXIS]);
+void settings_write_coord_data(coord_system_id_t id, coord_system_data_t *data);
 
 // Reads selected coordinate data from persistent storage
-bool settings_read_coord_data(coord_system_id_t id, float (*coord_data)[N_AXIS]);
+bool settings_read_coord_data(coord_system_id_t id, coord_system_data_t *data);
 
 // Temporarily override acceleration, if 0 restore to configured setting value
 bool settings_override_acceleration (uint8_t axis, float acceleration);
@@ -1141,7 +1162,7 @@ float setting_get_float_value (const setting_detail_t *setting, uint_fast16_t of
 setting_id_t settings_get_axis_base (setting_id_t id, uint_fast8_t *idx);
 bool setting_is_list (const setting_detail_t *setting);
 bool setting_is_integer (const setting_detail_t *setting);
-void setting_remove_elements (setting_id_t id, uint32_t mask);
+void setting_remove_elements (setting_id_t id, uint32_t mask, bool trim);
 bool settings_add_spindle_type (const char *type);
 limit_signals_t settings_get_homing_source (void);
 

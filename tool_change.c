@@ -5,7 +5,7 @@
 
   Part of grblHAL
 
-  Copyright (c) 2020-2025 Terje Io
+  Copyright (c) 2020-2026 Terje Io
 
   grblHAL is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -43,6 +43,8 @@ static volatile uint32_t spin_lock = 0;
 static tool_data_t current_tool = {}, *next_tool = NULL;
 static plane_t plane;
 static coord_data_t target = {}, previous;
+
+static tool_select_ptr tool_select;
 static driver_reset_ptr driver_reset = NULL;
 static enqueue_realtime_command_ptr enqueue_realtime_command = NULL;
 static control_signals_callback_ptr control_interrupt_callback = NULL;
@@ -51,7 +53,7 @@ static on_probe_completed_ptr on_probe_completed;
 static on_wco_saved_ptr on_wco_saved;
 
 // Clear tool length offset on homing
-static void onHomingComplete (axes_signals_t homing_cycle, bool success)
+FLASHMEM static void onHomingComplete (axes_signals_t homing_cycle, bool success)
 {
     if(on_homing_completed)
         on_homing_completed(homing_cycle, success);
@@ -60,18 +62,18 @@ static void onHomingComplete (axes_signals_t homing_cycle, bool success)
         //system_clear_tlo_reference(homing_cycle);
 }
 
-static void onWcoSaved (coord_system_id_t id, coord_data_t *offset)
+FLASHMEM static void onWcoSaved (coord_system_id_t id, coord_system_data_t *data)
 {
     if(on_wco_saved)
-        on_wco_saved(id, offset);
+        on_wco_saved(id, data);
 
-    if(id == gc_state.modal.coord_system.id && block_cycle_start)
+    if(id == gc_state.modal.g5x_offset.id && block_cycle_start)
         block_cycle_start = change_at_g30;
 }
 
 // Set tool offset on successful $TPW probe, prompt for retry on failure.
 // Called via probe completed event.
-static void onProbeCompleted (void)
+FLASHMEM static void onProbeCompleted (void)
 {
     if(!sys.flags.probe_succeeded)
         grbl.report.feedback_message(Message_ProbeFailedRetry);
@@ -81,7 +83,7 @@ static void onProbeCompleted (void)
 }
 
 // Restore HAL pointers on completion or reset.
-static void change_completed (void)
+FLASHMEM static void change_completed (void)
 {
     if(enqueue_realtime_command) {
         while(spin_lock);
@@ -115,7 +117,7 @@ static void change_completed (void)
 
 // Reset claimed HAL entry points and restore previous tool if needed on soft restart.
 // Called from EXEC_RESET and EXEC_STOP handlers (via HAL).
-static void reset (void)
+FLASHMEM static void reset (void)
 {
     if(next_tool) { //TODO: move to gc_xxx() function?
         // Restore previous tool if reset is during change
@@ -124,7 +126,7 @@ static void reset (void)
                 memcpy(gc_state.tool, &current_tool, sizeof(tool_data_t));
             else
                 memcpy(next_tool, &current_tool, sizeof(tool_data_t));
-            system_add_rt_report(Report_Tool);
+            report_add_realtime(Report_Tool);
         }
         gc_state.tool_pending = gc_state.tool->tool_id;
         next_tool = NULL;
@@ -135,7 +137,7 @@ static void reset (void)
 }
 
 // Restore coolant and spindle status, return controlled point to original position.
-static bool restore (void)
+FLASHMEM static bool restore (void)
 {
     bool ok;
     plan_line_data_t plan_data;
@@ -143,12 +145,14 @@ static bool restore (void)
     plan_data_init(&plan_data);
     plan_data.condition.rapid_motion = On;
 
-    if(!(ok = (target.values[plane.axis_0] == previous.values[plane.axis_0] &&
-                target.values[plane.axis_1] == previous.values[plane.axis_1]))) {
+    // Always move Z to home position first
+    target.values[plane.axis_linear] = sys.home_position[plane.axis_linear];
+    ok = mc_line(target.values, &plan_data);
 
-        target.values[plane.axis_linear] = sys.home_position[plane.axis_linear];
-
-        if((ok = mc_line(target.values, &plan_data)) && !settings.flags.no_restore_position_after_M6) {
+    // Then move XY to previous position if needed and full restore is enabled
+    if(ok && !settings.flags.no_restore_position_after_M6) {
+        if(target.values[plane.axis_0] != previous.values[plane.axis_0] ||
+           target.values[plane.axis_1] != previous.values[plane.axis_1]) {
             memcpy(&target, &previous, sizeof(coord_data_t));
             target.values[plane.axis_linear] = sys.home_position[plane.axis_linear];
             ok = mc_line(target.values, &plan_data);
@@ -177,7 +181,7 @@ static bool restore (void)
     return !ABORTED;
 }
 
-static bool go_linear_home (plan_line_data_t *pl_data)
+FLASHMEM static bool go_linear_home (plan_line_data_t *pl_data)
 {
     system_convert_array_steps_to_mpos(target.values, sys.position);
 
@@ -192,10 +196,13 @@ static bool go_linear_home (plan_line_data_t *pl_data)
 }
 #if COMPATIBILITY_LEVEL <= 1
 
-static bool go_toolsetter (plan_line_data_t *pl_data)
+FLASHMEM static bool go_toolsetter (plan_line_data_t *pl_data)
 {
+    coord_system_data_t g59_3_offset;
+
     // G59.3 contains offsets to toolsetter.
-    settings_read_coord_data(CoordinateSystem_G59_3, &target.values);
+    settings_read_coord_data(CoordinateSystem_G59_3, &g59_3_offset);
+	memcpy(target.values, g59_3_offset.coord.values, sizeof(float) * 3); // move only XYZ
 
     float tmp_pos = target.values[plane.axis_linear];
 
@@ -221,14 +228,14 @@ static bool go_toolsetter (plan_line_data_t *pl_data)
 
 // Issue warning on cycle start event if touch off by $TPW is pending.
 // Used in Manual and Manual_G59_3 modes ($341=1 or $341=2). Called from the foreground process.
-static void execute_warning (void *data)
+FLASHMEM static void execute_warning (void *data)
 {
     grbl.report.feedback_message(Message_ExecuteTPW);
 }
 
 // Execute restore position after tool change, either back to original or to toolsetter for touch off.
 // Used when G30 position is used for changing the tool. Called from the foreground process.
-static void execute_return_from_g30 (void *data)
+FLASHMEM static void execute_return_from_g30 (void *data)
 {
     bool ok;
     plan_line_data_t plan_data;
@@ -260,7 +267,7 @@ static void execute_return_from_g30 (void *data)
 
 // Execute restore position after touch off (on cycle start event).
 // Used in Manual and Manual_G59_3 modes ($341=1 or $341=2). Called from the foreground process.
-static void execute_restore (void *data)
+FLASHMEM static void execute_restore (void *data)
 {
     // Get current position.
     system_convert_array_steps_to_mpos(target.values, sys.position);
@@ -276,7 +283,7 @@ static void execute_restore (void *data)
 }
 
 // Set and limit probe travel to be within machine limits.
-static void set_probe_target (coord_data_t *target, uint8_t axis)
+FLASHMEM static void set_probe_target (coord_data_t *target, uint8_t axis)
 {
     target->values[axis] -= settings.tool_change.probing_distance;
 
@@ -286,39 +293,39 @@ static void set_probe_target (coord_data_t *target, uint8_t axis)
 
 // Execute touch off on cycle start event from @ G59.3 position.
 // Used in SemiAutomatic mode ($341=3) only. Called from the foreground process.
-static void execute_probe (void *data)
+FLASHMEM static void execute_probe (void *data)
 {
 #if COMPATIBILITY_LEVEL <= 1
     bool ok;
-    coord_data_t offset;
     plan_line_data_t plan_data;
     gc_parser_flags_t flags = {};
+    coord_system_data_t g59_3_offset;
 
     // G59.3 contains offsets to position of TLS.
-    settings_read_coord_data(CoordinateSystem_G59_3, &offset.values);
+    settings_read_coord_data(CoordinateSystem_G59_3, &g59_3_offset);
 
     plan_data_init(&plan_data);
     plan_data.condition.rapid_motion = On;
 
     ok = !change_at_g30 || go_linear_home(&plan_data);
 
-    target.values[plane.axis_0] = offset.values[plane.axis_0];
-    target.values[plane.axis_1] = offset.values[plane.axis_1];
+    target.values[plane.axis_0] = g59_3_offset.coord.values[plane.axis_0];
+    target.values[plane.axis_1] = g59_3_offset.coord.values[plane.axis_1];
 
     if(probe_toolsetter)
         grbl.on_probe_toolsetter(next_tool, &target, false, true);
 
     if((ok = ok && mc_line(target.values, &plan_data))) {
 
-        target.values[plane.axis_linear] = offset.values[plane.axis_linear];
+        target.values[plane.axis_linear] = g59_3_offset.coord.values[plane.axis_linear];
         ok = mc_line(target.values, &plan_data);
-
-        if(ok && probe_toolsetter)
-            grbl.on_probe_toolsetter(next_tool, NULL, true, true);
 
         plan_data.feed_rate = settings.tool_change.seek_rate;
         plan_data.condition.value = 0;
         plan_data.spindle.state.value = 0;
+
+        if(ok && probe_toolsetter)
+            plan_data.condition.probing_toolsetter = grbl.on_probe_toolsetter(next_tool, NULL, true, true);
 
         set_probe_target(&target, plane.axis_linear);
 
@@ -345,7 +352,7 @@ static void execute_probe (void *data)
             if(!(sys.tlo_reference_set.mask & bit(plane.axis_linear))) {
                 sys.tlo_reference[plane.axis_linear] = sys.probe_position[plane.axis_linear];
                 sys.tlo_reference_set.mask |= bit(plane.axis_linear);
-                system_add_rt_report(Report_TLOReference);
+                report_add_realtime(Report_TLOReference);
                 grbl.report.feedback_message(Message_ReferenceTLOEstablished);
             } else
                 gc_set_tool_offset(ToolLengthOffset_EnableDynamic, plane.axis_linear,
@@ -386,7 +393,7 @@ ISR_CODE static void ISR_FUNC(trap_control_cycle_start)(control_signals_t signal
     spin_lock--;
 }
 
-ISR_CODE static bool ISR_FUNC(trap_stream_cycle_start)(char c)
+ISR_CODE static bool ISR_FUNC(trap_stream_cycle_start)(uint8_t c)
 {
     bool drop = false;
 
@@ -421,15 +428,19 @@ ISR_CODE static void ISR_FUNC(on_toolchange_ack)(void)
 }
 
 // Set next and/or current tool. Called by gcode.c on on a Tn or M61 command (via HAL).
-static void tool_select (tool_data_t *tool, bool next)
+FLASHMEM static void onToolSelect (tool_data_t *tool, bool next)
 {
     next_tool = tool;
+
     if(!next)
         memcpy(&current_tool, tool, sizeof(tool_data_t));
+
+    if(tool_select)
+        tool_select(tool, next);
 }
 
 // Start a tool change sequence. Called by gcode.c on a M6 command (via HAL).
-static status_code_t tool_change (parser_state_t *parser_state)
+FLASHMEM static status_code_t tool_change (parser_state_t *parser_state)
 {
     if(next_tool == NULL)
         return Status_GCodeToolError;
@@ -474,7 +485,7 @@ static status_code_t tool_change (parser_state_t *parser_state)
     block_cycle_start = settings.tool_change.mode != ToolChange_SemiAutomatic;
 
     // Stop spindle and coolant.
-    spindle_all_off();
+    spindle_all_off(false);
     hal.coolant.set_state((coolant_state_t){0});
 
     execute_posted = false;
@@ -500,9 +511,11 @@ static status_code_t tool_change (parser_state_t *parser_state)
     //    tool_change_position = ?
     //else
 
-    if((change_at_g30 = (settings.flags.tool_change_at_g30) && (sys.homed.mask & (X_AXIS_BIT|Y_AXIS_BIT|Z_AXIS_BIT)) == (X_AXIS_BIT|Y_AXIS_BIT|Z_AXIS_BIT)))
-        settings_read_coord_data(CoordinateSystem_G30, &change_position.values);
-    else
+    if((change_at_g30 = settings.flags.tool_change_at_g30 && (sys.homed.mask & (X_AXIS_BIT|Y_AXIS_BIT|Z_AXIS_BIT)) == (X_AXIS_BIT|Y_AXIS_BIT|Z_AXIS_BIT))) {
+        coord_system_data_t g30_offset;
+        settings_read_coord_data(CoordinateSystem_G30, &g30_offset);
+        memcpy(change_position.values, g30_offset.coord.values, sizeof(float) * 3); // move only XYZ
+    } else
         change_position.values[plane.axis_linear] = sys.home_position[plane.axis_linear]; // - settings.homing.flags.force_set_origin ? LINEAR_AXIS_HOME_OFFSET : 0.0f;
 
     // Rapid to home position of linear axis.
@@ -549,29 +562,30 @@ static status_code_t tool_change (parser_state_t *parser_state)
 
 // Claim HAL tool change entry points and clear current tool offsets.
 // TODO: change to survive a warm reset?
-void tc_init (void)
+FLASHMEM void tc_init (void)
 {
     static bool on_homing_subscribed = false;
 
-    if(hal.driver_cap.atc) // Do not override driver tool change implementation!
+    if(hal.tool.atc_get_state() != ATC_None) // Do not override tool change implementation!
         return;
 
     if(!hal.stream.suspend_read) // Tool change requires support for suspending input stream.
         return;
 
-    system_add_rt_report(Report_TLOReference);
+    report_add_realtime(Report_TLOReference);
 
     if(settings.tool_change.mode == ToolChange_Disabled || settings.tool_change.mode == ToolChange_Ignore) {
-        hal.tool.select = NULL;
         hal.tool.change = NULL;
         grbl.on_toolchange_ack = NULL;
     } else {
-        hal.tool.select = tool_select;
         hal.tool.change = tool_change;
         grbl.on_toolchange_ack = on_toolchange_ack;
         if(!on_homing_subscribed) {
 
             on_homing_subscribed = true;
+
+            tool_select = hal.tool.select;
+            hal.tool.select = onToolSelect;
 
             on_homing_completed = grbl.on_homing_completed;
             grbl.on_homing_completed = onHomingComplete;
@@ -589,7 +603,7 @@ void tc_init (void)
 // Perform a probe cycle: set tool length offset and restart job if successful.
 // Note: tool length offset is set by the onProbeCompleted event handler.
 // Called by the $TPW system command.
-status_code_t tc_probe_workpiece (void)
+FLASHMEM status_code_t tc_probe_workpiece (void)
 {
     if(!(settings.tool_change.mode == ToolChange_Manual || settings.tool_change.mode == ToolChange_Manual_G59_3) || enqueue_realtime_command == NULL)
         return Status_InvalidStatement;
@@ -602,12 +616,12 @@ status_code_t tc_probe_workpiece (void)
     // TODO: add check for reference offset set?
 
     bool ok;
-    gc_parser_flags_t flags = {0};
+    gc_parser_flags_t flags = {};
     plan_line_data_t plan_data;
 
 #if COMPATIBILITY_LEVEL <= 1
     if(probe_toolsetter)
-        grbl.on_probe_toolsetter(next_tool, NULL, system_xy_at_fixture(CoordinateSystem_G59_3, TOOLSETTER_RADIUS), true);
+        plan_data.condition.probing_toolsetter = grbl.on_probe_toolsetter(next_tool, NULL, system_xy_at_fixture(CoordinateSystem_G59_3, TOOLSETTER_RADIUS), true);
 #endif
 
     // Get current position.

@@ -38,7 +38,13 @@ typedef union {
                  is_laser_ppi_mode    :1,
                  target_valid         :1,
                  target_validated     :1,
-                 unassigned           :5;
+                 probing_toolsetter   :1,
+#if ENABLE_JERK_ACCELERATION
+                 jerk                 :1,
+                 unassigned           :3;
+#else
+                 unassigned           :4;
+#endif
         coolant_state_t coolant;
     };
 } planner_cond_t;
@@ -64,6 +70,9 @@ typedef union {
 #ifdef V_AXIS
         uint32_t v;
 #endif
+#ifdef W_AXIS
+        uint32_t w;
+#endif
     };
 } steps_t;
 
@@ -80,7 +89,8 @@ typedef struct plan_block {
     // Block condition data to ensure correct execution depending on states and overrides.
     gc_override_flags_t overrides;  // Block bitfield variable for overrides
     planner_cond_t condition;       // Block bitfield variable defining block run conditions. Copied from pl_line_data.
-    int32_t line_number;            // Block line number for real-time reporting. Copied from pl_line_data.
+    uint32_t line_number;           // Block line number for real-time reporting. Copied from pl_line_data.
+    float target_mm[N_AXIS];        // Block target end location in mm for real-time reporting of distance to go.
 
     // Fields used by the motion planner to manage acceleration. Some of these values may be updated
     // by the stepper module during execution of special motion cases for replanning purposes.
@@ -103,9 +113,12 @@ typedef struct plan_block {
     float rate_multiplier;          // Rate multiplier of this block.
 #endif
 #if ENABLE_ACCELERATION_PROFILES
-    float acceleration_factor;        // Stores the currently used acceleration factor.
+//    float acceleration_factor;        // Stores the currently used acceleration factor.
 #endif
-    // Stored spindle speed data used by spindle overrides and resuming methods.
+#if PLANNER_ADD_MOTION_MODE
+    motion_mode_t motion_mode;
+#endif
+// Stored spindle speed data used by spindle overrides and resuming methods.
     spindle_t spindle;              // Block spindle parameters. Copied from pl_line_data.
 
     char *message;                  // Message to be displayed when block is executed.
@@ -127,11 +140,14 @@ typedef struct {
     float path_tolerance;           //!< Path blending tolerance.
     float cam_tolerance;            //!< Naive CAM tolerance.
 #endif
+#if PLANNER_ADD_MOTION_MODE
+    motion_mode_t motion_mode;
+#endif
     spindle_t spindle;              // Desired spindle parameters, such as RPM, through line motion.
     planner_cond_t condition;       // Bitfield variable to indicate planner conditions. See defines above.
     gc_override_flags_t overrides;  // Block bitfield variable for overrides
     offset_id_t offset_id;
-    int32_t line_number;            // Desired line number to report when executing.
+    uint32_t line_number;           // Desired line number to report when executing.
 //    void *parameters;               // TODO: pointer to extra parameters, for canned cycles and threading?
     char *message;                  // Message to be displayed when block is executed.
     output_command_t *output_commands;
@@ -145,6 +161,7 @@ typedef struct {
                                     // i.e. arcs, canned cycles, and backlash compensation.
   float previous_unit_vec[N_AXIS];  // Unit vector of previous path line segment
   float previous_nominal_speed;     // Nominal speed of previous path line segment
+  float actual_rpm;                 // Updated when in units per revolution blocks (G95) mode.
 } planner_t;
 
 // Initialize and reset the motion plan subsystem
@@ -166,6 +183,9 @@ plan_block_t *plan_get_system_motion_block (void);
 
 // Gets the current block. Returns NULL if buffer empty
 plan_block_t *plan_get_current_block (void);
+
+// Gets last added block. Returns NULL if buffer empty
+plan_block_t *plan_get_recent_block (void);
 
 // Called by step segment buffer when computing executing block velocity profile.
 float plan_get_exec_block_exit_speed_sqr (void);
@@ -191,5 +211,7 @@ bool plan_check_full_buffer (void);
 void plan_feed_override (override_t feed_override, override_t rapid_override);
 
 void plan_data_init (plan_line_data_t *plan_data);
+
+void plan_sync_velocity (void *block);
 
 #endif

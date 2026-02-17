@@ -3,7 +3,7 @@
 
   Part of grblHAL
 
-  Copyright (c) 2017-2025 Terje Io
+  Copyright (c) 2017-2026 Terje Io
   Copyright (c) 2011-2016 Sungeun K. Jeon for Gnea Research LLC
   Copyright (c) 2009-2011 Simen Svale Skogsrud
 
@@ -75,7 +75,7 @@ void mc_sync_backlash_position (void)
 // Execute linear motion in absolute millimeter coordinates. Feed rate given in millimeters/second
 // unless invert_feed_rate is true. Then the feed_rate means that the motion should be completed in
 // (1 minute)/feed_rate time.
-// NOTE: This is the primary gateway to the grbl planner. All line motions, including arc line
+// NOTE: This is the primary gateway to the grblHAL planner. All line motions, including arc line
 // segments, must pass through this routine before being passed to the planner. The separation of
 // mc_line and plan_buffer_line is done primarily to place non-planner-type functions from being
 // in the planner and to let backlash compensation or canned cycle integration simple and direct.
@@ -143,10 +143,11 @@ bool mc_line (float *target, plan_line_data_t *pl_data)
                 plan_line_data_t pl_backlash;
 
                 plan_data_init(&pl_backlash);
-                pl_backlash.condition.rapid_motion = On;
-                pl_backlash.condition.backlash_motion = On;
+                pl_backlash.feed_rate = pl_data->feed_rate;
                 pl_backlash.line_number = pl_data->line_number;
                 pl_backlash.spindle.rpm = pl_data->spindle.rpm;
+                pl_backlash.condition.backlash_motion = On;
+                pl_backlash.condition.rapid_motion = pl_data->condition.rapid_motion;
 
                 // If the buffer is full: good! That means we are well ahead of the robot.
                 // Remain in this loop until there is room in the buffer.
@@ -245,7 +246,7 @@ void mc_arc (float *target, plan_line_data_t *pl_data, float *position, float *o
         pl_data->condition.target_validated = On;
         pl_data->condition.target_valid = grbl.check_arc_travel_limits((coord_data_t *)target, (coord_data_t *)position,
                                                                         (point_2d_t){ .x = (float)center.x, .y = (float)center.y },
-                                                                         radius, plane, turns);
+                                                                         radius, plane, turns, &sys.work_envelope);
     }
 
     if(labs(turns) > 1) {
@@ -408,10 +409,10 @@ static inline float interp (const float a, const float b, const float t)
 }
 
 /**
- * Compute a B�zier curve using the De Casteljau's algorithm (see
+ * Compute a Bezier curve using the De Casteljau's algorithm (see
  * https://en.wikipedia.org/wiki/De_Casteljau's_algorithm), which is
  * easy to code and has good numerical stability (very important,
- * since Arudino works with limited precision real numbers).
+ * since Arduino works with limited precision real numbers).
  */
 static inline float eval_bezier (const float a, const float b, const float c, const float d, const float t)
 {
@@ -473,7 +474,7 @@ static inline float dist1 (const float x1, const float y1, const float x2, const
  * power available on Arduino, I think it is not wise to implement it.
  */
 
-void mc_cubic_b_spline (float *target, plan_line_data_t *pl_data, float *position, float *first, float *second)
+FLASHMEM void mc_cubic_b_spline (float *target, plan_line_data_t *pl_data, float *position, float *first, float *second)
 {
     float bez_target[N_AXIS];
 
@@ -563,7 +564,7 @@ void mc_cubic_b_spline (float *target, plan_line_data_t *pl_data, float *positio
 
 // end Bezier splines
 
-void mc_canned_drill (motion_mode_t motion, float *target, plan_line_data_t *pl_data, float *position, plane_t plane, uint32_t repeats, gc_canned_t *canned)
+FLASHMEM bool mc_canned_drill (motion_mode_t motion, float *target, plan_line_data_t *pl_data, float *position, plane_t plane, uint32_t repeats, gc_canned_t *canned)
 {
     pl_data->condition.rapid_motion = On; // Set rapid motion condition flag.
 
@@ -571,7 +572,7 @@ void mc_canned_drill (motion_mode_t motion, float *target, plan_line_data_t *pl_
     if(position[plane.axis_linear] < canned->retract_position) {
         position[plane.axis_linear] = canned->retract_position;
         if(!mc_line(position, pl_data))
-            return;
+            return false;
     }
 
     float position_linear = position[plane.axis_linear],
@@ -581,7 +582,7 @@ void mc_canned_drill (motion_mode_t motion, float *target, plan_line_data_t *pl_
     memcpy(position, target, sizeof(float) * N_AXIS);
     position[plane.axis_linear] = position_linear;
     if(!mc_line(position, pl_data))
-        return;
+        return false;
 
     while(repeats--) {
 
@@ -589,7 +590,7 @@ void mc_canned_drill (motion_mode_t motion, float *target, plan_line_data_t *pl_
         if(position[plane.axis_linear] > canned->retract_position) {
             position[plane.axis_linear] = canned->retract_position;
             if(!mc_line(position, pl_data))
-                return;
+                return false;
         }
 
         position_linear = position[plane.axis_linear];
@@ -604,7 +605,15 @@ void mc_canned_drill (motion_mode_t motion, float *target, plan_line_data_t *pl_
 
             position[plane.axis_linear] = position_linear;
             if(!mc_line(position, pl_data)) // drill
-                return;
+                return false;
+
+            if(motion == MotionMode_CannedCycle84) {
+                if(!spindle_set_state_synced(pl_data->spindle.hal, (spindle_state_t){0}, 0.0f, pl_data->spindle.rpm_mode))
+                    return false;
+                pl_data->spindle.state.ccw = !pl_data->spindle.state.ccw;
+                pl_data->spindle.hal->set_state(pl_data->spindle.hal, pl_data->spindle.state, pl_data->spindle.rpm); // synced??
+                pl_data->spindle.state.ccw = !pl_data->spindle.state.ccw;
+            }
 
             if(canned->dwell > 0.0f)
                 mc_dwell(canned->dwell);
@@ -628,10 +637,12 @@ void mc_canned_drill (motion_mode_t motion, float *target, plan_line_data_t *pl_
 
             pl_data->condition.rapid_motion = canned->rapid_retract;
             if(!mc_line(position, pl_data))
-                return;
+                return false;
 
-            if(canned->spindle_off)
-                spindle_set_state_synced(pl_data->spindle.hal, pl_data->spindle.state, pl_data->spindle.rpm);
+            if(canned->spindle_off || motion == MotionMode_CannedCycle84) {
+                if(!spindle_set_state_synced(pl_data->spindle.hal, pl_data->spindle.state, pl_data->spindle.rpm, pl_data->spindle.rpm_mode))
+                    return false;
+            }
         }
 
         pl_data->condition.rapid_motion = On; // Set rapid motion condition flag.
@@ -641,11 +652,13 @@ void mc_canned_drill (motion_mode_t motion, float *target, plan_line_data_t *pl_
             position[plane.axis_0] += canned->xyz[plane.axis_0];
             position[plane.axis_1] += canned->xyz[plane.axis_1];
             if(!mc_line(position, pl_data))
-                return;
+                return false;
         }
     }
 
     memcpy(target, position, sizeof(float) * N_AXIS);
+
+    return !ABORTED;
 }
 
 // Calculates depth-of-cut (DOC) for a given threading pass.
@@ -661,7 +674,7 @@ inline static float calc_thread_doc (uint_fast16_t pass, float cut_depth, float 
 
 // TODO: change pitch to follow any tapers
 
-void mc_thread (plan_line_data_t *pl_data, float *position, gc_thread_data *thread, bool feed_hold_disabled)
+FLASHMEM void mc_thread (plan_line_data_t *pl_data, float *position, gc_thread_data *thread, bool feed_hold_disabled)
 {
     uint_fast16_t pass = 1, passes = 0;
     float doc = thread->initial_depth, inv_degression = 1.0f / thread->depth_degression, thread_length;
@@ -782,7 +795,7 @@ void mc_thread (plan_line_data_t *pl_data, float *position, gc_thread_data *thre
 }
 
 // Sets up valid jog motion received from g-code parser, checks for soft-limits, and executes the jog.
-status_code_t mc_jog_execute (plan_line_data_t *pl_data, parser_block_t *gc_block, float *position)
+FLASHMEM status_code_t mc_jog_execute (plan_line_data_t *pl_data, parser_block_t *gc_block, float *position)
 {
     // Initialize planner data struct for jogging motions.
     // NOTE: Spindle and coolant are allowed to fully function with overrides during a jog.
@@ -794,8 +807,8 @@ status_code_t mc_jog_execute (plan_line_data_t *pl_data, parser_block_t *gc_bloc
     pl_data->line_number = gc_block->values.n;
 
     if(settings.limits.flags.jog_soft_limited)
-        grbl.apply_travel_limits(gc_block->values.xyz, position);
-    else if(sys.soft_limits.mask && !grbl.check_travel_limits(gc_block->values.xyz, sys.soft_limits, true))
+        grbl.apply_travel_limits(gc_block->values.xyz, position, &sys.work_envelope);
+    else if(sys.soft_limits.mask && !grbl.check_travel_limits(gc_block->values.xyz, sys.soft_limits, true, &sys.work_envelope))
         return Status_TravelExceeded;
 
     // Valid jog command. Plan, set state, and execute.
@@ -814,7 +827,7 @@ status_code_t mc_jog_execute (plan_line_data_t *pl_data, parser_block_t *gc_bloc
 }
 
 // Execute dwell in seconds.
-void mc_dwell (float seconds)
+FLASHMEM void mc_dwell (float seconds)
 {
     if (state_get() != STATE_CHECK_MODE) {
         protocol_buffer_synchronize();
@@ -825,7 +838,7 @@ void mc_dwell (float seconds)
 // Perform homing cycle to locate and set machine zero. Only '$H' executes this command.
 // NOTE: There should be no motions in the buffer and grblHAL must be in an idle state before
 // executing the homing cycle. This prevents incorrect buffered plans after homing.
-status_code_t mc_homing_cycle (axes_signals_t cycle)
+FLASHMEM status_code_t mc_homing_cycle (axes_signals_t cycle)
 {
     bool home_all = cycle.mask == 0;
     status_code_t homed_status = Status_OK;
@@ -958,7 +971,7 @@ status_code_t mc_homing_cycle (axes_signals_t cycle)
         sync_position();
     }
 
-    system_add_rt_report(Report_Homed);
+    report_add_realtime(Report_Homed);
 
     homed_status = settings.limits.flags.hard_enabled &&
                     settings.limits.flags.check_at_init &&
@@ -977,7 +990,7 @@ status_code_t mc_homing_cycle (axes_signals_t cycle)
 
 // Perform tool length probe cycle. Requires probe switch.
 // NOTE: Upon probe failure, the program will be stopped and placed into ALARM state.
-gc_probe_t mc_probe_cycle (float *target, plan_line_data_t *pl_data, gc_parser_flags_t parser_flags)
+FLASHMEM gc_probe_t mc_probe_cycle (float *target, plan_line_data_t *pl_data, gc_parser_flags_t parser_flags)
 {
     uint_fast8_t idx = N_AXIS;
 
@@ -986,39 +999,25 @@ gc_probe_t mc_probe_cycle (float *target, plan_line_data_t *pl_data, gc_parser_f
         return GCProbe_CheckMode;
 
     if(settings.probe.soft_limited)
-        grbl.apply_travel_limits(target, NULL);
+        grbl.apply_travel_limits(target, NULL, &sys.work_envelope);
 
     do {
         idx--;
         sys.probe_position[idx] = lroundf(target[idx] * settings.axis[idx].steps_per_mm);
     } while(idx);
 
-    sys.probe_coordsys_id = gc_state.modal.coord_system.id;
+    sys.probe_coordsys_id = gc_state.modal.g5x_offset.id;
 
     // Finish all queued commands and empty planner buffer before starting probe cycle.
     if (!protocol_buffer_synchronize())
         return GCProbe_Abort; // Return if system reset has been issued.
 
-    // Initialize probing control variables
-    sys.flags.probe_succeeded = Off; // Re-initialize probe history before beginning cycle.
-    hal.probe.configure(parser_flags.probe_is_away, true);
-
 #if COMPATIBILITY_LEVEL <= 1
     bool at_g59_3 = false, probe_toolsetter = grbl.on_probe_toolsetter != NULL && state_get() != STATE_TOOL_CHANGE && (sys.homed.mask & (X_AXIS_BIT|Y_AXIS_BIT));
 
     if(probe_toolsetter)
-        grbl.on_probe_toolsetter(NULL, NULL, at_g59_3 = system_xy_at_fixture(CoordinateSystem_G59_3, TOOLSETTER_RADIUS), true);
+        pl_data->condition.probing_toolsetter = grbl.on_probe_toolsetter(NULL, NULL, at_g59_3 = system_xy_at_fixture(CoordinateSystem_G59_3, TOOLSETTER_RADIUS), true);
 #endif
-
-    // After syncing, check if probe is already triggered or not connected. If so, halt and issue alarm.
-    // NOTE: This probe initialization error applies to all probing cycles.
-    probe_state_t probe = hal.probe.get_state();
-    if (probe.triggered || !probe.connected) { // Check probe state.
-        system_set_exec_alarm(Alarm_ProbeFailInitial);
-        protocol_execute_realtime();
-        hal.probe.configure(false, false); // Re-initialize invert mask before returning.
-        return GCProbe_FailInit; // Nothing else to do but bail.
-    }
 
     if(grbl.on_probe_start) {
 
@@ -1035,6 +1034,31 @@ gc_probe_t mc_probe_cycle (float *target, plan_line_data_t *pl_data, gc_parser_f
         } while(idx);
 
         grbl.on_probe_start(axes, target, pl_data);
+    }
+
+    // Initialize probing control variables
+    sys.flags.probe_succeeded = Off; // Re-initialize probe history before beginning cycle.
+    hal.probe.configure(parser_flags.probe_is_away, true);
+
+    // After syncing, check if probe is already triggered or not connected. If so, halt and issue alarm.
+    // NOTE: This probe initialization error applies to all probing cycles.
+    probe_state_t probe = hal.probe.get_state();
+    if (probe.triggered || !probe.connected) { // Check probe state.
+
+        system_set_exec_alarm(Alarm_ProbeFailInitial);
+        protocol_execute_realtime();
+
+        hal.probe.configure(false, false); // Re-initialize invert mask before returning.
+
+#if COMPATIBILITY_LEVEL <= 1
+        if(probe_toolsetter)
+            grbl.on_probe_toolsetter(NULL, NULL, at_g59_3, false);
+#endif
+
+        if(grbl.on_probe_completed)
+            grbl.on_probe_completed();
+
+        return GCProbe_FailInit; // Nothing else to do but bail.
     }
 
     // Setup and queue probing motion. Auto cycle-start should not start the cycle.
@@ -1092,7 +1116,7 @@ gc_probe_t mc_probe_cycle (float *target, plan_line_data_t *pl_data, gc_parser_f
 
 // Plans and executes the single special motion case for parking. Independent of main planner buffer.
 // NOTE: Uses the always free planner ring buffer head to store motion parameters for execution.
-bool mc_parking_motion (float *parking_target, plan_line_data_t *pl_data)
+FLASHMEM bool mc_parking_motion (float *parking_target, plan_line_data_t *pl_data)
 {
     bool ok;
 
@@ -1110,12 +1134,23 @@ bool mc_parking_motion (float *parking_target, plan_line_data_t *pl_data)
     return ok;
 }
 
-void mc_override_ctrl_update (gc_override_flags_t override_state)
+FLASHMEM void mc_override_ctrl_update (gc_override_flags_t override_state)
 {
-// Finish all queued commands before altering override control state
-    protocol_buffer_synchronize();
-    if (!sys.abort)
+ // Finish all queued commands before altering override control state
+    if(sys.override.control.value != override_state.value)
+        protocol_buffer_synchronize();
+
+    if(!sys.abort) {
+
         sys.override.control = override_state;
+
+        spindle_t *spindle;
+        uint8_t idx = N_SYS_SPINDLE, rpm_disable = override_state.spindle_rpm_disable;
+        do {
+            if((spindle = gc_spindle_get(--idx))->hal)
+                spindle_override_disable(spindle->hal, bit_istrue(rpm_disable, bit(idx)));
+        } while(idx);
+    }
 }
 
 // Method to ready the system to reset by setting the realtime reset command and killing any

@@ -65,6 +65,13 @@ If more than 3 axes are configured a compliant driver and board map file is need
 #define N_SYS_SPINDLE 1
 #endif
 
+/*! \def PLANNER_ADD_MOTION_MODE
+\brief Enables passing the motion mode used to the planner.
+*/
+#if !defined PLANNER_ADD_MOTION_MODE || defined __DOXYGEN__
+#define PLANNER_ADD_MOTION_MODE Off  // Default disabled. Set to \ref On or 1 to enable.
+#endif
+
 /*! \def BUILD_INFO
 \brief Defines string to be output as part of the `$I` or `$I+` command response.
 */
@@ -185,6 +192,8 @@ or EMI triggering the related interrupt falsely or too many times.
 #if !defined DEBOUNCE_DELAY || defined __DOXYGEN__
 #define DEBOUNCE_DELAY 40 // ms
 #endif
+
+#define MAX_TOOL_NUMBER 2147483647 // Limited by max signed 32-bit value - 1
 
 // ---------------------------------------------------------------------------------------
 // ADVANCED CONFIGURATION OPTIONS:
@@ -728,6 +737,15 @@ Enabling this setting enables status reporting while homing.
 #define DEFAULT_REPORT_WHEN_HOMING Off // Default off. Set to \ref On or 1 to enable.
 #endif
 
+/*! \def DEFAULT_REPORT_DISTANCE_TO_GO
+\brief
+If set to \ref Off or 0 the `|DTG:` distance-to-go element is not included in the real time report.
+\internal Bit 13 in settings.status_report.
+*/
+#if !defined DEFAULT_REPORT_DISTANCE_TO_GO || defined __DOXYGEN__
+#define DEFAULT_REPORT_DISTANCE_TO_GO Off // Default off. Set to \ref On or 1 to enable.
+#endif
+
 ///@}
 
 /*! @name $11 - Setting_JunctionDeviation
@@ -891,7 +909,7 @@ to a reset during motion.
 /*! /def DEFAULT_KEEP_OFFSETS_ON_RESET
 \brief
 Enable this setting to keep offsets (except G92 which is always kept) over a soft reset.
-\internal Bit 14 in settings.flags.
+\internal Bit 17 in settings.flags.
 */
 ///@{
 #if !defined DEFAULT_KEEP_OFFSETS_ON_RESET || defined __DOXYGEN__
@@ -899,13 +917,36 @@ Enable this setting to keep offsets (except G92 which is always kept) over a sof
 #endif
 ///@}
 
+/*! /def DEFAULT_KEEP_RAPIDS_OVR_ON_RESET
+\brief
+Enable this setting to keep rapids override over a soft reset.
+\internal Bit 21 in settings.flags.
+*/
+///@{
+#if !defined DEFAULT_KEEP_RAPIDS_OVR_ON_RESET || defined __DOXYGEN__
+#define DEFAULT_KEEP_RAPIDS_OVR_ON_RESET Off
+#endif
+///@}
+
+/*! /def DEFAULT_KEEP_FEED_OVR_ON_RESET
+\brief
+Enable this setting to feedrate override over a soft reset.
+\internal Bit 22 in settings.flags.
+*/
+///@{
+#if !defined DEFAULT_KEEP_FEED_OVR_ON_RESET || defined __DOXYGEN__
+#define DEFAULT_KEEP_FEED_OVR_ON_RESET Off
+#endif
+///@}
+
+
 // Control signals settings (Group_ControlSignals)
 
 #ifndef __DOXYGEN__ // For now do not include in documentation
 
 /*! @name Control signals bit definitions and mask.
 
-__NOTE:__ these definitions are only referenced in this file. Do __NOT__ change!
+__NOTE:__  Do __NOT__ change! Definitions MUST match #control_signals_t struct bit order.
 */
 ///@{
 #define SIGNALS_RESET_BIT (1<<0)
@@ -917,6 +958,12 @@ __NOTE:__ these definitions are only referenced in this file. Do __NOT__ change!
 #define SIGNALS_ESTOP_BIT (1<<6)
 #define SIGNALS_PROBE_CONNECTED_BIT (1<<7)
 #define SIGNALS_MOTOR_FAULT_BIT (1<<8)
+#define SIGNALS_MOTOR_WARNING_BIT (1<<9)
+#define SIGNALS_LIMITS_OVERRIDE_BIT (1<<10)
+#define SIGNALS_SINGLE_BLOCK_BIT (1<<11)
+#define SIGNALS_TLS_OVERTRAVEL_BIT (1<<12)
+#define SIGNALS_PROBE_OVERTRAVEL (1<<13)
+#define SIGNALS_PROBE_TRIGGERED_BIT (1<<14)
 #define SIGNALS_BITMASK (SIGNALS_RESET_BIT|SIGNALS_FEEDHOLD_BIT|SIGNALS_CYCLESTART_BIT|SIGNALS_SAFETYDOOR_BIT|SIGNALS_BLOCKDELETE_BIT|SIGNALS_STOPDISABLE_BIT|SIGNALS_ESTOP_BIT|SIGNALS_PROBE_CONNECTED_BIT|SIGNALS_MOTOR_FAULT_BIT)
 ///@}
 
@@ -1077,6 +1124,9 @@ Useful for some pre-built electronic boards.
 #endif
 #if !defined DEFAULT_PWM_SPINDLE_DISABLE_LASER_MODE || defined __DOXYGEN__
 #define DEFAULT_PWM_SPINDLE_DISABLE_LASER_MODE Off
+#endif
+#if !defined DEFAULT_PWM_SPINDLE_ENABLE_RAMP || defined __DOXYGEN__
+#define DEFAULT_PWM_SPINDLE_ENABLE_RAMP Off
 #endif
 ///@}
 
@@ -1416,14 +1466,25 @@ and less range over the total 255 PWM levels to signal different spindle speeds.
 #endif
 ///@}
 
+/*! @name $485 - Setting_EnableToolPersistence
+*/
+///@{
+#if !defined DEFAULT_PERSIST_TOOL || defined __DOXYGEN__
+#define DEFAULT_PERSIST_TOOL Off
+#endif
+///@}
+
 // Homing settings (Group_Homing)
 
 /*! @name $22 - Setting_HomingEnable
-\brief Enable homing.
+\brief Enable and control homing functionality.
 Requires homing cycles to be defined by \ref DEFAULT_HOMING_CYCLE_0 - \ref DEFAULT_HOMING_CYCLE_2 +.
-\internal Bit 0 in settings.homing.flags.
 */
 ///@{
+/*! /def DEFAULT_HOMING_ENABLE
+\brief Enables homing overall.
+\internal Bit 0 in settings.homing.flags.
+*/
 #if !defined DEFAULT_HOMING_ENABLE || defined __DOXYGEN__
 #define DEFAULT_HOMING_ENABLE Off // Default disabled. Set to \ref On or 1 to enable.
 #endif
@@ -1480,7 +1541,7 @@ homing cycle while on the limit switch and not have to move the machine off of i
 \brief
 If enabled this allows using the homing $-commands to set the home position to the
 current axis position.
-\internal Bit 4 in settings.homing.flags.
+\internal Bit 5 in settings.homing.flags.
 */
 #if !defined DEFAULT_HOMING_ALLOW_MANUAL || defined __DOXYGEN__
 #define DEFAULT_HOMING_ALLOW_MANUAL Off // Default disabled. Set to \ref On or 1 to enable.
@@ -1490,7 +1551,7 @@ current axis position.
 \brief
 If homing init lock is enabled this sets grblHAL into an alarm state upon power up or a soft reset.
 To allow a soft reset to override the lock uncomment the line below.
-\internal Bit 5 in settings.homing.flags.
+\internal Bit 6 in settings.homing.flags.
 */
 #if !defined DEFAULT_HOMING_OVERRIDE_LOCKS || defined __DOXYGEN__
 #define DEFAULT_HOMING_OVERRIDE_LOCKS Off // Default disabled. Set to \ref On or 1 to enable.
@@ -1499,10 +1560,20 @@ To allow a soft reset to override the lock uncomment the line below.
 /*! /def DEFAULT_HOMING_USE_LIMIT_SWITCHES
 \brief
 Enable this setting to force using limit switches for homing.
-\internal Bit 7 in settings.homing.flags.
+\internal Bit 8 in settings.homing.flags.
 */
 #if !defined DEFAULT_HOMING_USE_LIMIT_SWITCHES || defined __DOXYGEN__
 #define DEFAULT_HOMING_USE_LIMIT_SWITCHES Off // Default disabled. Set to \ref On or 1 to enable.
+#endif
+///@}
+
+/*! /def DEFAULT_RUN_STARTUP_SCRIPTS_ONLY_ON_HOMED
+\brief
+Enable this setting to to only run startup scripts ($N0 and $N1) on homing completed.
+\internal Bit 10 in settings.homing.flags.
+*/
+#if !defined DEFAULT_RUN_STARTUP_SCRIPTS_ONLY_ON_HOMED || defined __DOXYGEN__
+#define DEFAULT_RUN_STARTUP_SCRIPTS_ONLY_ON_HOMED Off // Default disabled. Set to \ref On or 1 to enable.
 #endif
 ///@}
 
@@ -1612,7 +1683,7 @@ greater.
 /*! @name $47 - Setting_HomingCycle_4
 */
 ///@{
-#if (defined A_AXIS && !defined DEFAULT_HOMING_CYCLE_3) || defined __DOXYGEN__
+#if (N_AXIS > 3 && !defined DEFAULT_HOMING_CYCLE_3) || defined __DOXYGEN__
 #define DEFAULT_HOMING_CYCLE_3 0                        // OPTIONAL: Uncomment and add axes mask to enable
 #endif
 ///@}
@@ -1621,7 +1692,7 @@ greater.
 \ref axismask
  */
 ///@{
-#if (defined B_AXIS && !defined DEFAULT_HOMING_CYCLE_4) || defined __DOXYGEN__
+#if (N_AXIS > 4 && !defined DEFAULT_HOMING_CYCLE_4) || defined __DOXYGEN__
 #define DEFAULT_HOMING_CYCLE_4 0                        // OPTIONAL: Uncomment and add axes mask to enable
 #endif
 ///@}
@@ -1629,7 +1700,7 @@ greater.
 /*! @name $49 - Setting_HomingCycle_6
 */
 ///@{
-#if (defined C_AXIS && !defined DEFAULT_HOMING_CYCLE_5) || defined __DOXYGEN__
+#if (N_AXIS > 5 && !defined DEFAULT_HOMING_CYCLE_5) || defined __DOXYGEN__
 #define DEFAULT_HOMING_CYCLE_5 0                        // OPTIONAL: Uncomment and add axes mask to enable
 #endif
 ///@}
@@ -1925,14 +1996,51 @@ Specify at least \ref X_AXIS_BIT if a common enable signal is used.
 #endif
 ///@}
 
-/*! @name $376 - Settings_Axis_Rotational
-Designate ABC axes as rotational by \ref axismask. This will disable scaling (to mm) in inches mode.
+/*! @name $376 - Settings_RotaryAxes
+Designate ABC axes as rotary by \ref axismask. This will disable scaling (to mm) in inches mode.
 Set steps/mm for the axes to the value that represent the desired movement per unit.
 For the controller the distance is unitless and and can be in degrees, radians, rotations, ...
 */
 ///@{
+
+#define IS_ROTARY_LETTER(c) (c == 'A' || c == 'B' || c == 'C')
+
 #if !defined DEFAULT_AXIS_ROTATIONAL_MASK || defined __DOXYGEN__
-#define DEFAULT_AXIS_ROTATIONAL_MASK 0
+#if N_AXIS > 3 && IS_ROTARY_LETTER(AXIS3_LETTER)
+#define RA3 (1<<3)
+#else
+#define RA3 0
+#endif
+#if N_AXIS > 4 && IS_ROTARY_LETTER(AXIS4_LETTER)
+#define RA4 (1<<4)
+#else
+#define RA4 0
+#endif
+#if N_AXIS > 5 && IS_ROTARY_LETTER(AXIS5_LETTER)
+#define RA5 (1<<5)
+#else
+#define RA5 0
+#endif
+#if N_AXIS > 6 && IS_ROTARY_LETTER(AXIS6_LETTER)
+#define RA6 (1<<6)
+#else
+#define RA6 0
+#endif
+#if N_AXIS > 7 && IS_ROTARY_LETTER(AXIS7_LETTER)
+#define RA7 (1<<7)
+#else
+#define RA7 0
+#endif
+#define DEFAULT_AXIS_ROTATIONAL_MASK (RA3|RA4|RA5|RA6|RA7)
+#endif
+///@}
+
+/*! @name $680 - Setting_StepperEnableDelay
+Allowed range 0 - 250 milliseconds. Driver adds ~2 milliseconds.
+*/
+///@{
+#if !defined DEFAULT_STEPPER_ENABLE_DELAY || defined __DOXYGEN__
+#define DEFAULT_STEPPER_ENABLE_DELAY 0
 #endif
 ///@}
 
@@ -2034,6 +2142,63 @@ G90
 #endif
 ///@}
 
+/*! @name $374 - Settings_ModBus_BaudRate
+Default baud rate for ModBus RTU stream.
+*/
+///@{
+#if !defined DEFAULT_MODBUS_STREAM_BAUD || defined __DOXYGEN__
+#define DEFAULT_MODBUS_STREAM_BAUD 3 // 0 = 2400, 1 = 4800, 2 = 9600, 3 = 19200, 4 = 38400, 5 = 115200
+#endif
+///@}
+
+/*! @name $681 - Setting_ModBus_StreamFormat
+Default stream format settings for ModBus RTU stream.
+*/
+///@{
+#if !defined DEFAULT_MODBUS_STREAM_DATA_BITS || defined __DOXYGEN__
+#define DEFAULT_MODBUS_STREAM_DATA_BITS 0 // 0 = 8, 1 = 7
+#endif
+///@}
+///@{
+#if !defined DEFAULT_MODBUS_STREAM_STOP_BITS || defined __DOXYGEN__
+#define DEFAULT_MODBUS_STREAM_STOP_BITS 0 // 0 = 1, 1 = 1.5, 2 = 2, 3 = 0.5
+#endif
+///@}///@{
+#if !defined DEFAULT_MODBUS_STREAM_PARITY || defined __DOXYGEN__
+#define DEFAULT_MODBUS_STREAM_PARITY 0 // 0 = None, 1 = Even, 2 = Odd
+#endif
+///@}
+/*! @name $650 - Setting_FSOptions
+Filing systems options.
+*/
+///@{
+/*! /def DEFAULT_FS_SD_AUTOMOUNT
+\brief Auto mount SD card on startup.
+\internal Bit 0 in settings.fs_options.mask.
+*/
+#if !defined DEFAULT_FS_SD_AUTOMOUNT || defined __DOXYGEN__
+#define DEFAULT_FS_SD_AUTOMOUNT Off // Default disabled. Set to \ref On or 1 to enable.
+#endif
+
+/*! /def DEFAULT_FS_LITLLEFS_HIDDEN
+\brief Hides LittleFS mount from directory listings.
+\internal Bit 1 in settings.fs_options.mask.
+*/
+#if !defined DEFAULT_FS_LITLLEFS_HIDDEN || defined __DOXYGEN__
+#define DEFAULT_FS_LITLLEFS_HIDDEN Off // Default disabled. Set to \ref On or 1 to enable.
+#endif
+
+/*! /def DEFAULT_FS_HIERACHICAL_LISTING
+\brief
+Adds directory entries in $F and $F+ output to allow hierarchical navigation of the directoy tree.
+\internal Bit 2 in settings.fs_options.mask.
+*/
+#if !defined DEFAULT_FS_HIERACHICAL_LISTING || defined __DOXYGEN__
+#define DEFAULT_FS_HIERACHICAL_LISTING Off // Default disabled. Set to \ref On or 1 to enable.
+#endif
+///@}
+
+
 // Axis settings (Group_XAxis - Group_VAxis)
 
 /*! @name $10x - Setting_AxisStepsPerMM
@@ -2063,6 +2228,9 @@ G90
 #endif
 #if (defined V_AXIS && !defined DEFAULT_V_STEPS_PER_MM) || defined __DOXYGEN__
 #define DEFAULT_V_STEPS_PER_MM 250.0f
+#endif
+#if (defined W_AXIS && !defined DEFAULT_W_STEPS_PER_MM) || defined __DOXYGEN__
+#define DEFAULT_W_STEPS_PER_MM 250.0f
 #endif
 ///@}
 
@@ -2094,6 +2262,9 @@ G90
 #if (defined V_AXIS && !defined DEFAULT_V_MAX_RATE) || defined __DOXYGEN__
 #define DEFAULT_V_MAX_RATE 500.0f // mm/min
 #endif
+#if (defined W_AXIS && !defined DEFAULT_W_MAX_RATE) || defined __DOXYGEN__
+#define DEFAULT_W_MAX_RATE 500.0f // mm/min
+#endif
 ///@}
 
 /*! @name 12x - Setting_AxisAcceleration
@@ -2123,34 +2294,40 @@ G90
 #if (defined V_AXIS && !defined DEFAULT_V_ACCELERATION) || defined __DOXYGEN__
 #define DEFAULT_V_ACCELERATION 10.0f // mm/sec^2
 #endif
+#if (defined W_AXIS && !defined DEFAULT_W_ACCELERATION) || defined __DOXYGEN__
+#define DEFAULT_W_ACCELERATION 10.0f // mm/sec^2
+#endif
 ///@}
 
 /*! @name 22x - Setting_AxisJerk
 */
 ///@{
 #if !defined DEFAULT_X_JERK|| defined __DOXYGEN__
-#define DEFAULT_X_JERK 100.0f // mm/sec^3
+#define DEFAULT_X_JERK (DEFAULT_X_ACCELERATION * 10.0f) // mm/sec^3
 #endif
 #if !defined DEFAULT_Y_JERK|| defined __DOXYGEN__
-#define DEFAULT_Y_JERK 100.0f // mm/sec^3
+#define DEFAULT_Y_JERK (DEFAULT_Y_ACCELERATION * 10.0f) // mm/sec^3
 #endif
 #if !defined DEFAULT_Z_JERK || defined __DOXYGEN__
-#define DEFAULT_Z_JERK 100.0f // mm/sec^3
+#define DEFAULT_Z_JERK (DEFAULT_Z_ACCELERATION * 10.0f) // mm/sec^3
 #endif
 #if (defined A_AXIS && !defined DEFAULT_A_JERK) || defined __DOXYGEN__
-#define DEFAULT_A_JERK 100.0f // mm/sec^3
+#define DEFAULT_A_JERK (DEFAULT_A_ACCELERATION * 10.0f) // mm/sec^3
 #endif
 #if (defined B_AXIS && !defined DEFAULT_B_JERK) || defined __DOXYGEN__
-#define DEFAULT_B_JERK 100.0f // mm/sec^3
+#define DEFAULT_B_JERK (DEFAULT_B_ACCELERATION * 10.0f) // mm/sec^3
 #endif
 #if (defined C_AXIS && !defined DEFAULT_C_JERK) || defined __DOXYGEN__
-#define DEFAULT_C_JERK 100.0f // mm/sec^3
+#define DEFAULT_C_JERK (DEFAULT_C_ACCELERATION * 10.0f) // mm/sec^3
 #endif
 #if (defined U_AXIS && !defined DEFAULT_U_JERK) || defined __DOXYGEN__
-#define DEFAULT_U_JERK 100.0f // mm/sec^3
+#define DEFAULT_U_JERK (DEFAULT_U_ACCELERATION * 10.0f) // mm/sec^3
 #endif
 #if (defined V_AXIS && !defined DEFAULT_V_JERK) || defined __DOXYGEN__
-#define DEFAULT_V_JERK 100.0f // mm/sec^3
+#define DEFAULT_V_JERK (DEFAULT_V_ACCELERATION * 10.0f) // mm/sec^3
+#endif
+#if (defined W_AXIS && !defined DEFAULT_W_JERK) || defined __DOXYGEN__
+#define DEFAULT_W_JERK (DEFAULT_W_ACCELERATION * 10.0f) // mm/sec^3
 #endif
 ///@}
 
@@ -2182,6 +2359,9 @@ __NOTE:__ Must be a positive values.
 #if (defined V_AXIS && !defined DEFAULT_V_MAX_TRAVEL) || defined __DOXYGEN__
 #define DEFAULT_V_MAX_TRAVEL 200.0f // mm
 #endif
+#if (defined W_AXIS && !defined DEFAULT_W_MAX_TRAVEL) || defined __DOXYGEN__
+#define DEFAULT_W_MAX_TRAVEL 200.0f // mm
+#endif
 ///@}
 
 /*! @name 14x - Setting_AxisStepperCurrent
@@ -2212,16 +2392,17 @@ __NOTE:__ Must be a positive values.
 #if (defined V_AXIS && !defined DEFAULT_V_CURRENT) || defined __DOXYGEN__
 #define DEFAULT_V_CURRENT 500.0f // mA RMS
 #endif
+#if (defined W_AXIS && !defined DEFAULT_W_CURRENT) || defined __DOXYGEN__
+#define DEFAULT_W_CURRENT 500.0f // mA RMS
+#endif
 ///@}
 
 // Sanity checks
 
 // N_TOOLS may have been defined on the compiler command line.
-#if defined(N_TOOLS) && N_TOOLS == 0
-#undef N_TOOLS
-#endif
-
-#if defined(N_TOOLS) && N_TOOLS > 32
+#if !defined(N_TOOLS)
+#define N_TOOLS 0
+#elif N_TOOLS > 32
 #undef N_TOOLS
 #define N_TOOLS 32
 #endif
@@ -2263,7 +2444,7 @@ __NOTE:__ Must be a positive values.
 #error "Cannot enable laser and lathe mode at the same time!"
 #endif
 
-#if LATHE_UVW_OPTION && (N_AXIS > 6 || AXIS_REMAP_ABC2UVW)
+#if LATHE_UVW_OPTION && AXIS_REMAP_ABC2UVW
 #warning "Cannot enable lathe UVW option when N_AXIS > 6 or ABC words are remapped!"
 #undef LATHE_UVW_OPTION
 #define LATHE_UVW_OPTION Off

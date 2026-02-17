@@ -7,18 +7,18 @@
 
   Copyright (c) 2017-2023 Terje Io
 
-  Grbl is free software: you can redistribute it and/or modify
+  grblHAL is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
   the Free Software Foundation, either version 3 of the License, or
   (at your option) any later version.
 
-  Grbl is distributed in the hope that it will be useful,
+  grblHAL is distributed in the hope that it will be useful,
   but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
   GNU General Public License for more details.
 
   You should have received a copy of the GNU General Public License
-  along with Grbl.  If not, see <http://www.gnu.org/licenses/>.
+  along with grblHAL. If not, see <http://www.gnu.org/licenses/>.
 */
 
 #include "grbl.h"
@@ -43,7 +43,7 @@ ISR_CODE void ISR_FUNC(enqueue_feed_override)(uint8_t cmd)
 }
 
 // Returns 0 if no commands enqueued
-uint8_t get_feed_override (void)
+FLASHMEM uint8_t get_feed_override (void)
 {
     uint8_t data = 0;
     uint_fast8_t bptr = feed.tail;
@@ -67,7 +67,7 @@ ISR_CODE void ISR_FUNC(enqueue_spindle_override)(uint8_t cmd)
 }
 
 // Returns 0 if no commands enqueued
-uint8_t get_spindle_override (void)
+FLASHMEM uint8_t get_spindle_override (void)
 {
     uint8_t data = 0;
     uint_fast8_t bptr = spindle.tail;
@@ -91,7 +91,7 @@ ISR_CODE void ISR_FUNC(enqueue_coolant_override)(uint8_t cmd)
 }
 
 // Returns 0 if no commands enqueued
-uint8_t get_coolant_override (void)
+FLASHMEM uint8_t get_coolant_override (void)
 {
     uint8_t data = 0;
     uint_fast8_t bptr = coolant.tail;
@@ -104,7 +104,7 @@ uint8_t get_coolant_override (void)
     return data;
 }
 
-void flush_override_buffers (void)
+FLASHMEM void flush_override_buffers (void)
 {
     feed.head = feed.tail = spindle.head = spindle.tail = coolant.head = coolant.tail = 0;
 }

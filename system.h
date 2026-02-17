@@ -3,7 +3,7 @@
 
   Part of grblHAL
 
-  Copyright (c) 2017-2025 Terje Io
+  Copyright (c) 2017-2026 Terje Io
   Copyright (c) 2014-2016 Sungeun K. Jeon for Gnea Research LLC
 
   grblHAL is free software: you can redistribute it and/or modify
@@ -50,14 +50,14 @@ know when there is a realtime command to execute.
 #define EXEC_RESET              bit(5)
 #define EXEC_SAFETY_DOOR        bit(6)
 #define EXEC_MOTION_CANCEL      bit(7)
-#define EXEC_MOTION_CANCEL_FAST bit(7)
-#define EXEC_SLEEP              bit(8)
-#define EXEC_TOOL_CHANGE        bit(9)
-#define EXEC_PID_REPORT         bit(10)
-#define EXEC_GCODE_REPORT       bit(11)
-#define EXEC_TLO_REPORT         bit(12)
-#define EXEC_RT_COMMAND         bit(13)
-#define EXEC_DOOR_CLOSED        bit(14)
+#define EXEC_MOTION_CANCEL_FAST bit(7) // Permanently enabled for now
+#define EXEC_SLEEP              bit(9)
+#define EXEC_TOOL_CHANGE        bit(10)
+#define EXEC_PID_REPORT         bit(11)
+#define EXEC_GCODE_REPORT       bit(12)
+#define EXEC_TLO_REPORT         bit(13)
+#define EXEC_RT_COMMAND         bit(14)
+#define EXEC_DOOR_CLOSED        bit(15)
 ///@}
 
 //! \def sys_state
@@ -158,31 +158,6 @@ typedef union {
     };
 } step_control_t;
 
-// NOTE: the pin_function_t enum must be kept in sync with any changes!
-typedef union {
-    uint16_t bits;
-    uint16_t mask;
-    uint16_t value;
-    struct {
-        uint16_t reset                :1,
-                 feed_hold            :1,
-                 cycle_start          :1,
-                 safety_door_ajar     :1,
-                 block_delete         :1,
-                 stop_disable         :1, //! M1
-                 e_stop               :1,
-                 probe_disconnected   :1,
-                 motor_fault          :1,
-                 motor_warning        :1,
-                 limits_override      :1,
-                 single_block         :1,
-                 tls_overtravel       :1, //! used for probe (toolsetter) protection
-                 probe_overtravel     :1, //! used for probe protection
-                 probe_triggered      :1, //! used for probe protection
-                 deasserted           :1; //! this flag is set if signals are deasserted.
-    };
-} control_signals_t;
-
 // Define spindle stop override control states.
 typedef union {
     uint8_t value;
@@ -206,59 +181,6 @@ typedef struct {
 } pid_data_t;
 
 #endif
-
-typedef enum {
-    Report_ClearAll = 0,
-    Report_MPGMode = (1 << 0),
-    Report_Scaling = (1 << 1),
-    Report_Homed   = (1 << 2),
-    Report_LatheXMode = (1 << 3),
-    Report_Spindle = (1 << 4),
-    Report_Coolant = (1 << 5),
-    Report_Overrides = (1 << 6),
-    Report_Tool = (1 << 7),
-    Report_WCO = (1 << 8),
-    Report_GWCO = (1 << 9),
-    Report_ToolOffset = (1 << 10),
-    Report_M66Result = (1 << 11),
-    Report_PWM = (1 << 12),
-    Report_Motor = (1 << 13),
-    Report_Encoder = (1 << 14),
-    Report_TLOReference = (1 << 15),
-    Report_Fan = (1 << 16),
-    Report_SpindleId = (1 << 17),
-    Report_ForceWCO = (1 << 29),
-    Report_CycleStart = (1 << 30),
-    Report_All = 0x8003FFFF
-} report_tracking_t;
-
-typedef union {
-    uint32_t value;
-    struct {
-        uint32_t mpg_mode      :1, //!< MPG mode changed.
-                 scaling       :1, //!< Scaling (G50/G51) changed.
-                 homed         :1, //!< Homed state changed.
-                 xmode         :1, //!< Lathe radius/diameter mode changed.
-                 spindle       :1, //!< Spindle state changed.
-                 coolant       :1, //!< Coolant state changed.
-                 overrides     :1, //!< Overrides changed.
-                 tool          :1, //!< Tool changed.
-                 wco           :1, //!< Add work coordinates.
-                 gwco          :1, //!< Add work coordinate.
-                 tool_offset   :1, //!< Tool offsets changed.
-                 m66result     :1, //!< M66 result updated
-                 pwm           :1, //!< Add PWM information (optional: to be added by driver).
-                 motor         :1, //!< Add motor information (optional: to be added by driver).
-                 encoder       :1, //!< Add encoder information (optional: to be added by driver).
-                 tlo_reference :1, //!< Tool length offset reference changed.
-                 fan           :1, //!< Fan on/off changed.
-                 spindle_id    :1, //!< Spindle changed
-                 unassigned   :11, //
-                 force_wco     :1, //!< Add work coordinates (due to WCO changed during motion).
-                 cycle_start   :1, //!< Cycle start signal triggered. __NOTE:__ do __NOT__ add to Report_All enum above!
-                 all           :1; //!< Set when CMD_STATUS_REPORT_ALL is requested, may be used by user code.
-    };
-} report_tracking_flags_t;
 
 typedef struct {
     override_t feed_rate;           //!< Feed rate override value in percent
@@ -291,9 +213,9 @@ typedef union {
                  single_block            :1, //!< Set to true to disable M1 (optional stop), via realtime command.
                  keep_input              :1, //!< Set to true to not flush stream input buffer on executing STOP.
                  auto_reporting          :1, //!< Set to true when auto real time reporting is enabled.
-                 synchronizing           :1, //!< Set to true when protocol_buffer_synchronize() is running.
                  travel_changed          :1, //!< Set to true when maximum travel settings has changed.
                  is_homing               :1,
+				 is_parking			     :1, //!< Set to true when CMD_SAFETY_DOOR is received.
                  unused                  :3;
     };
 } system_flags_t;
@@ -318,14 +240,12 @@ typedef struct system {
     bool reset_pending;                     //!< Set when reset processing is underway.
     bool blocking_event;                    //!< Set when a blocking event that requires reset to clear is active.
     volatile bool steppers_deenergize;      //!< Set to true to deenergize stepperes
-    alarm_code_t alarm_pending;             //!< Delayed alarm, currently used for probe protection
-    system_flags_t flags;                   //!< Assorted state flags
+    volatile system_flags_t flags;                   //!< Assorted state flags
     step_control_t step_control;            //!< Governs the step segment generator depending on system state.
     axes_signals_t homing_axis_lock;        //!< Locks axes when limits engage. Used as an axis motion mask in the stepper ISR.
     axes_signals_t homing;                  //!< Axes with homing enabled.
     overrides_t override;                   //!< Override values & states
     system_override_delay_t override_delay; //!< Flags for delayed overrides.
-    report_tracking_flags_t report;         //!< Tracks when to add data to status reports.
     parking_state_t parking_state;          //!< Tracks parking state
     hold_state_t holding_state;             //!< Tracks holding state
     coord_system_id_t probe_coordsys_id;    //!< Coordinate system in which last probe took place.
@@ -348,9 +268,11 @@ typedef struct system {
 //!  @name The following variables are not cleared upon soft reset, do NOT move. alarm must be first!
 //@{
     alarm_code_t alarm;                     //!< Current alarm, only valid if system state is STATE_ALARM.
+    alarm_code_t alarm_pending;             //!< Delayed alarm, currently used for probe protection
     bool cold_start;                        //!< Set to true on boot, is false on subsequent soft resets.
     bool ioinit_pending;
     bool driver_started;                    //!< Set to true when driver initialization is completed.
+    bool steppers_enabled;                  //!< Set to true when all steppers are enabled.
     bool mpg_mode;                          //!< To be moved to system_flags_t
     signal_event_t last_event;              //!< Last signal events (control and limits signal).
     int32_t position[N_AXIS];               //!< Real-time machine (aka home) position vector in steps.
@@ -404,8 +326,6 @@ void system_output_help (const sys_command_t *commands, uint32_t num_commands);
 void system_register_commands (sys_commands_t *commands);
 
 void system_clear_tlo_reference (axes_signals_t homing_cycle);
-void system_add_rt_report (report_tracking_t report);
-report_tracking_flags_t system_get_rt_report_flags (void);
 
 // Special handlers for setting and clearing grblHAL's real-time execution flags.
 #define system_set_exec_state_flag(mask) hal.set_bits_atomic(&sys.rt_exec_state, (mask))

@@ -48,31 +48,36 @@
 typedef union {
     uint32_t value; //!< All bitmap flags.
     struct {
-        uint32_t software_debounce         :1, //!< Software debounce of input switches signals is supported.
-                 step_pulse_delay          :1, //!< Stepper step pulse delay is supported.
-                 limits_pull_up            :1, //!< Pullup resistors for limit inputs are are supported.
-                 control_pull_up           :1, //!< Pullup resistors for control inputs are supported.
-                 probe_pull_up             :1, //!< Pullup resistors for probe inputs are supported.
-                 amass_level               :2, // 0...3 Deprecated?
-                 spindle_encoder           :1, //!< Spindle encoder is supported.
-                 spindle_sync              :1, //!< Spindle synced motion is supported.
-                 sd_card                   :1,
-                 littlefs                  :1,
-                 bluetooth                 :1,
-                 ethernet                  :1,
-                 wifi                      :1,
-                 spindle_pid               :1,
-                 mpg_mode                  :1,
-                 laser_ppi_mode            :1, //!< Laser PPI (Pulses Per Inch) mode is supported.
-                 atc                       :1, //!< Automatic tool changer (ATC) is supported.
-                 no_gcode_message_handling :1,
-                 odometers                 :1,
-                 pwm_spindle               :1,
-                 probe_latch               :1,
-                 toolsetter                :1, //!< Toolsetter (2nd probe) input is supported.
-                 rtc                       :1,
-                 rtc_set                   :1,
-                 unassigned                :7;
+        uint32_t software_debounce           :1, //!< Software debounce of input switches signals is supported.
+                 step_pulse_delay            :1, //!< Stepper step pulse delay is supported.
+                 limits_pull_up              :1, //!< Pullup resistors for limit inputs are are supported.
+                 control_pull_up             :1, //!< Pullup resistors for control inputs are supported.
+                 probe_pull_up               :1, //!< Pullup resistors for probe inputs are supported.
+                 amass_level                 :2, // 0...3 Deprecated?
+                 spindle_encoder             :1, //!< Spindle encoder is supported.
+                 spindle_encoder_index_event :1, //!< Spindle encoder is supported.
+                 spindle_sync                :1, //!< Spindle synced motion is supported.
+                 sd_card                     :1,
+                 littlefs                    :1,
+                 bluetooth                   :1,
+                 ethernet                    :1,
+                 wifi                        :1,
+                 spindle_pid                 :1,
+                 mpg_mode                    :1,
+                 laser_ppi_mode              :1, //!< Laser PPI (Pulses Per Inch) mode is supported.
+                 atc                         :1, //!< Automatic tool changer (ATC) is supported.
+                 no_gcode_message_handling   :1,
+                 odometers                   :1,
+                 pwm_spindle                 :1,
+                 probe_latch                 :1, //!< Deprecated.
+                 probe                       :1, //!< Primary (default) probe input is supported.
+                 probe2                      :1, //!< 2nd or 3rd probe input is supported.
+                 toolsetter                  :1, //!< Toolsetter (2nd probe) input is supported.
+                 rtc                         :1,
+                 rtc_set                     :1,
+                 bltouch_probe               :1,
+                 modbus_rtu                  :1, // Modbus RTU stream is enabled.
+                 unassigned                  :3;
     };
 } driver_cap_t;
 
@@ -358,9 +363,9 @@ typedef struct {
 } delay_t;
 
 
-/***********
- *  Probe  *
- ***********/
+/************
+ *  Probes  *
+ ************/
 
 /*! \brief Pointer to function for getting probe status.
 \returns probe state in a \a #probe_state_t union.
@@ -369,14 +374,31 @@ __NOTE:__ this function will be called from an interrupt context.
 */
 typedef probe_state_t (*probe_get_state_ptr)(void);
 
+/*! \brief Pointer to function for getting triggered status for a specific probe.
+\param probe_id probe number. 0 - default probe, 1 - toolsetter, ...
+\returns \a true if triggered, \a false otherwise.
+*/
+typedef bool (*probe_is_triggered_ptr)(probe_id_t probe_id);
+
 /*! \brief Pointer to function for setting probe operation mode.
 \param is_probe_away true if probing away from the workpiece, false otherwise. When probing away the signal must be inverted in the probe_get_state_ptr() implementation.
 \param probing true if probe cycle is active, false otherwise.
 */
 typedef void (*probe_configure_ptr)(bool is_probe_away, bool probing);
 
-/*! \brief Pointer to function for toggling probe connected status.
+/*! \brief Pointer to function for selecting probe input.
+\param probe_id probe number. 0 - default probe, 1 - toolsetter, ...
+\returns true if selection succeded, false otherwise.
+*/
+typedef bool (*probe_select_ptr)(probe_id_t probe_id);
 
+/*! \brief Pointer to function for getting probe capabilities.
+\param probe_id probe number. 0 - default probe, 1 - toolsetter, ...
+\returns a \a probe_flags_t struct.
+*/
+typedef probe_flags_t (*probe_get_caps_ptr)(probe_id_t probe_id);
+
+/*! \brief Pointer to function for toggling probe connected status.
 If the driver does not support a probe connected input signal this can be used to implement
 toggling of probe connected status via a #CMD_PROBE_CONNECTED_TOGGLE real time command.
 */
@@ -386,6 +408,9 @@ typedef void (*probe_connected_toggle_ptr)(void);
 typedef struct {
     probe_configure_ptr configure;                  //!< Optional handler for setting probe operation mode.
     probe_get_state_ptr get_state;                  //!< Optional handler for getting probe status. Called from interrupt context.
+    probe_is_triggered_ptr is_triggered;            //!< Optional handler for getting probe triggered status.
+    probe_select_ptr select;                        //!< Optional handler for selecting probe to use.
+    probe_get_caps_ptr get_caps;                    //!< Optional handler for getting probe capabilities.
     probe_connected_toggle_ptr connected_toggle;    //!< Optional handler for toggling probe connected status.
 } probe_ptrs_t;
 
@@ -393,6 +418,12 @@ typedef struct {
 /*******************************
  *  Tool selection and change  *
  *******************************/
+
+typedef enum {
+    ATC_None = 0,
+    ATC_Offline,
+    ATC_Online
+} atc_status_t;
 
 /*! \brief Pointer to function for selecting a tool.
 \param tool pointer to tool_data_t struct.
@@ -405,6 +436,11 @@ typedef void (*tool_select_ptr)(tool_data_t *tool, bool next);
 */
 typedef status_code_t (*tool_change_ptr)(parser_state_t *gc_state);
 
+/*! \brief Pointer to function for checking ATC status.
+\returns \a true if online.
+*/
+typedef atc_status_t (*atc_get_state_ptr)(void);
+
 /*! \brief Handlers for tool changes.
 
 If the driver (or a plugin) does not set these handlers the core will set them to its own
@@ -412,10 +448,10 @@ handlers for manual or semi-automatic tool change if the current input stream su
 the tool change protocol.
  */
 typedef struct {
-    tool_select_ptr select; //!< Optional handler for selecting a tool.
-    tool_change_ptr change; //!< Optional handler for executing a tool change (M6).
+    tool_select_ptr select;    //!< Optional handler for selecting a tool.
+    tool_change_ptr change;    //!< Optional handler for executing a tool change (M6).
+    atc_get_state_ptr atc_get_state; //!< Optional handler for checking ATC status.
 } tool_ptrs_t;
-
 
 /*******************
  *  Encoder input  *
@@ -443,6 +479,13 @@ typedef struct {
     encoder_reset_ptr reset;                    //!< Optional handler for resetting data for an encoder.
 } encoder_ptrs_t;
 
+/*! \brief Pointer to callback function to receive spindle encoder index events.
+\param count index pulse count.
+*/
+typedef void (*spindle_encoder_on_index_ptr)(int32_t count);
+
+//****
+
 /*! \brief Pointer to function for claiming higher level interrupt requests (irq).
 \param irq irq type as a #irq_type_t enum value.
 \param id irq id, normally 0, > 0 if there are several sources for the same irq type.
@@ -468,7 +511,10 @@ typedef union {
         uint8_t periodic :1, //!<
                 up       :1, //!< Timer supports upcounting
                 comp1    :1, //!< Timer supports compare interrupt 0
-                comp2    :1; //!< Timer supports compare interrupt 1
+                comp2    :1, //!< Timer supports compare interrupt 1
+                ext_clk  :1, //!< External clock supported
+                encoder  :1, //!< Emcode mode supported
+                unused   :2;
     };
 } timer_cap_t;
 
@@ -477,6 +523,7 @@ typedef void (*timer_irq_handler_ptr)(void *context);
 typedef struct {
     void *context;                          //!< Pointer to data to be passed on to the interrupt handlers
     bool single_shot;                       //!< Set to true if timer is single shot
+    uint32_t period;                        //!< Current value for period register
     timer_irq_handler_ptr timeout_callback; //!< Pointer to main timeout callback
     uint32_t irq0;                          //!< Compare value for compare interrupt 0
     timer_irq_handler_ptr irq0_callback;    //!< Pointer to compare interrupt 0 callback
@@ -645,6 +692,7 @@ typedef struct {
     void (*reboot)(void);                   //!< Optoional handler for rebooting the controller. This will be called when #ASCII_ESC followed by #CMD_REBOOT is received.
 
     encoder_ptrs_t encoder;                 //!< Optional handlers for encoder support.
+    spindle_encoder_on_index_ptr spindle_encoder_on_index;  //!< Optional handler (callback) to receive spindle encoder index event.
 
     /*! \brief Optional handler for getting the current axis positions.
     \returns the axis positions in an int32_array.

@@ -3,7 +3,7 @@
 
   Part of grblHAL
 
-  Copyright (c) 2021-2025 Terje Io
+  Copyright (c) 2021-2026 Terje Io
 
   grblHAL is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -101,10 +101,28 @@ typedef enum {
     NGCParam_selected_pocket,
     NGCParam_call_level,
     NGCParam_probe_state,
+    NGCParam_probe2_state,
     NGCParam_toolsetter_state,
+    NGCParam_active_probe,
+    NGCParam_homed_state,
+    NGCParam_homed_axes,
+    NGCParam_tool_table_size,
+    NGCParam_free_memory,
     NGCParam_Last
 } ncg_name_param_id_t;
 
+typedef enum {
+    G65Macro_GetSetting          = 1,
+    G65Macro_GetToolOffset       = 2,
+    G65Macro_ParameterRW         = 3,
+    G65Macro_GetMachineState     = 4,
+    G65Macro_SelectProbe         = 5,
+    G65Macro_SpindleDelayDisable = 6,
+    G65Macro_ModbusMessage       = 7,
+    G65Macro_LastInbuilt         = G65Macro_ModbusMessage
+} g65_inbuilt_t;
+
+void ngc_params_init (void);
 uint8_t ngc_float_decimals (void);
 bool ngc_param_get (ngc_param_id_t id, float *value);
 bool ngc_param_set (ngc_param_id_t id, float value);
@@ -112,7 +130,7 @@ bool ngc_param_is_rw (ngc_param_id_t id);
 bool ngc_param_exists (ngc_param_id_t id);
 bool ngc_named_param_get (char *name, float *value);
 float ngc_named_param_get_by_id (ncg_name_param_id_t id);
-bool ngc_named_param_set (char *name, float value);
+float *ngc_named_param_set (char *name, float value);
 bool ngc_named_param_exists (char *name);
 
 bool ngc_string_param_set (ngc_param_id_t id, char *value);
@@ -124,7 +142,8 @@ void ngc_string_param_delete (ngc_string_id_t id);
 bool ngc_call_push (void *context);
 bool ngc_call_pop (void);
 uint_fast8_t ngc_call_level (void);
-bool ngc_modal_state_save (gc_modal_t *state, bool auto_restore);
+bool ngc_modal_state_save (gc_modal_t *state, gc_override_values_t *overrides, float feed_rate, bool auto_restore);
+gc_modal_snapshot_t *ngc_modal_state_get (void);
 bool ngc_modal_state_restore (void);
 void ngc_modal_state_invalidate (void);
 

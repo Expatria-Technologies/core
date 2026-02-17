@@ -5,7 +5,7 @@
 
   Part of grblHAL
 
-  Copyright (c) 2022-2025 Terje Io
+  Copyright (c) 2022-2026 Terje Io
 
   grblHAL is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -26,6 +26,10 @@
 
 #include "hal.h"
 #include "vfs.h"
+
+#ifndef VFS_CWD_LENGTH
+#define VFS_CWD_LENGTH 100
+#endif
 
 #ifdef ARDUINO_SAM_DUE
 #undef feof
@@ -174,7 +178,7 @@ static char *fs_getcwd (char *buf, size_t size)
     return "/";
 }
 
-static const vfs_t fs_null = {
+PROGMEM static const vfs_t fs_null = {
     .fopen = fs_open,
     .fclose = fs_close,
     .fread = fs_read,
@@ -202,7 +206,7 @@ static vfs_mount_t root = {
     .next = NULL
 };
 static vfs_mount_t *cwdmount = &root;
-static char cwd[100] = "/";
+static char cwd[VFS_CWD_LENGTH] = "/";
 
 volatile int vfs_errno = 0;
 vfs_events_t vfs = {0};
@@ -263,7 +267,7 @@ vfs_file_t *vfs_open (const char *filename, const char *mode)
 
     if(mount && (file = mount->vfs->fopen(get_filename(mount, filename), mode))) {
         file->fs = mount->vfs;
-        file->update = !mount->mode.hidden && !!strchr(mode, 'w');
+        file->status.update = !mount->mode.hidden && !!strchr(mode, 'w');
     }
 
     return file;
@@ -275,7 +279,7 @@ void vfs_close (vfs_file_t *file)
 
     ((vfs_t *)(file->fs))->fclose(file);
 
-    if(file->update && vfs.on_fs_changed)
+    if(file->status.update && vfs.on_fs_changed)
         vfs.on_fs_changed((vfs_t *)file->fs);
 }
 
@@ -381,8 +385,12 @@ int vfs_rmdir (const char *path)
 int vfs_chdir (const char *path)
 {
     int ret;
+    char *p;
 
     vfs_errno = 0;
+
+    if(!strcmp("..", path) && strcmp("/", (path = cwd)) && (p = strrchr(cwd, '/')))
+        *(p + (p == cwd ? 1 : 0)) = '\0';
 
     if(*path != '/' && strcmp(cwd, "/")) {
         if(strcmp(path, "..")) {
@@ -511,11 +519,20 @@ int vfs_chmod (const char *filename, vfs_st_mode_t attr, vfs_st_mode_t mask)
 
 int vfs_stat (const char *filename, vfs_stat_t *st)
 {
+    char tmp[VFS_CWD_LENGTH], *p;
+
+    if(!strcmp("..", filename)) {
+        strcpy(tmp, cwd);
+        if((p = strrchr(tmp, '/')))
+            *(p + (p == tmp ? 1 : 0)) = '\0';
+        filename = tmp;
+    }
+
     vfs_mount_t *mount = get_mount(filename);
 
     int ret = mount ? mount->vfs->fstat(get_filename(mount, filename), st) : -1;
 
-    if(ret == -1 && strchr(filename, '/') == NULL && !strcmp("/", cwd)) {
+    if(ret == -1 && (!strcmp("/", filename) || (strchr(filename, '/') == NULL && !strcmp("/", cwd)))) {
 
         strcat(cwd, filename);
         mount = get_mount(cwd);
@@ -721,5 +738,5 @@ int vfs_drive_format (vfs_drive_t *drive)
 {
     const vfs_t *fs = drive->fs;
 
-    return fs->format ? fs->format() : -1;
+    return (vfs_errno = fs->format ? fs->format() : -1);
 }

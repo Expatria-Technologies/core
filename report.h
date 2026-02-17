@@ -3,21 +3,21 @@
 
   Part of grblHAL
 
-  Copyright (c) 2018-2024 Terje Io
+  Copyright (c) 2018-2026 Terje Io
   Copyright (c) 2012-2016 Sungeun K. Jeon for Gnea Research LLC
 
-  Grbl is free software: you can redistribute it and/or modify
+  grblHAL is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
   the Free Software Foundation, either version 3 of the License, or
   (at your option) any later version.
 
-  Grbl is distributed in the hope that it will be useful,
+  grblHAL is distributed in the hope that it will be useful,
   but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
   GNU General Public License for more details.
 
   You should have received a copy of the GNU General Public License
-  along with Grbl.  If not, see <http://www.gnu.org/licenses/>.
+  along with grblHAL. If not, see <http://www.gnu.org/licenses/>.
 */
 
 #ifndef _REPORT_H_
@@ -49,22 +49,22 @@ void report_info (void *message);
 // Message helper to be run as foreground task.
 void report_warning (void *message);
 
-// Prints Grbl help.
+// Prints grblHAL help.
 status_code_t report_help (char *args);
 
 void report_plugin (const char *name, const char *version);
 
-// Prints Grbl settings
+// Prints grblHAL settings
 void report_grbl_settings (bool all, void *data);
 
-// Prints Grbl setting
+// Prints grblHAL setting
 status_code_t report_grbl_setting (setting_id_t id, void *data);
 
 // Prints an echo of the pre-parsed line received right before execution.
 void report_echo_line_received (char *line);
 
 // Prints realtime status report.
-void report_realtime_status (void);
+void report_realtime_status (stream_write_ptr stream_write, status_report_tracking_t *report);
 
 // Prints recorded probe position.
 void report_probe_parameters (void);
@@ -82,11 +82,11 @@ status_code_t report_named_ngc_parameter (char *arg);
 
 #endif
 
-// Prints Grbl NGC parameters (coordinate offsets, probe).
+// Prints grblHAL NGC parameters (coordinate offsets, probe).
 void report_ngc_parameters (void);
 
 // Prints current g-code parser mode state.
-void report_gcode_modes (void);
+void report_gcode_modes (stream_write_ptr stream_write);
 
 // Prints startup line when requested and executed.
 void report_startup_line (uint8_t n, char *line);
@@ -99,9 +99,7 @@ status_code_t report_alarm_details (bool grbl_format);
 status_code_t report_error_details (bool grbl_format);
 status_code_t report_setting_group_details (bool by_id, char *prefix);
 status_code_t report_settings_details (settings_format_t format, setting_id_t setting, setting_group_t group);
-#ifndef NO_SETTINGS_DESCRIPTIONS
 status_code_t report_setting_description (settings_format_t format, setting_id_t id);
-#endif
 
 status_code_t report_last_signals_event (sys_state_t state, char *args);
 status_code_t report_current_limit_state (sys_state_t state, char *args);
@@ -115,6 +113,8 @@ status_code_t report_pins (sys_state_t state, char *args);
 
 status_code_t report_pin_states (sys_state_t state, char *args);
 
+status_code_t report_uart_ports (sys_state_t state, char *args);
+
 // Prints registered spindles.
 status_code_t report_spindles (bool machine_readable);
 
@@ -126,5 +126,8 @@ status_code_t report_time (void);
 
 // Prints current PID log.
 void report_pid_log (void);
+
+report_tracking_flags_t report_get_rt_flags_all (void);
+void report_add_realtime (report_tracking_t report);
 
 #endif

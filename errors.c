@@ -27,7 +27,6 @@
 #include "core_handlers.h"
 
 PROGMEM static const status_detail_t status_detail[] = {
-#ifndef NO_SETTINGS_DESCRIPTIONS
     { Status_OK, NULL },
     { Status_ExpectedCommandLetter, "G-code words consist of a letter and a value. Letter was not found." },
     { Status_BadNumberFormat, "Missing the expected G-code word value or numeric value format is not valid." },
@@ -88,6 +87,7 @@ PROGMEM static const status_detail_t status_detail[] = {
     { Status_GCodeCoordSystemLocked, "Coordinate system is locked." },
 #endif
     { Status_UnexpectedDemarcation, "Unexpected file demarcation." },
+    { Status_AuxiliaryPortUnavailable, "Port is not available" },
 #if NGC_EXPRESSIONS_ENABLE
     { Status_ExpressionUknownOp, "Unknown operation found in expression." },
     { Status_ExpressionDivideByZero, "Divide by zero in expression attempted." },
@@ -106,8 +106,8 @@ PROGMEM static const status_detail_t status_detail[] = {
     { Status_FlowControlOutOfMemory, "Out of memory while executing flow statement." },
 #endif
     { Status_FileOpenFailed, "Could not open file." },
-    { Status_UserException, "User defined error occured." }
-#endif // NO_SETTINGS_DESCRIPTIONS
+    { Status_UserException, "User defined error occured." },
+    { Status_AuxiliaryPortUnusable, "Port is not usable." }
 };
 
 static error_details_t details = {

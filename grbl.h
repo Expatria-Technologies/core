@@ -3,7 +3,7 @@
 
   Part of grblHAL
 
-  Copyright (c) 2017-2025 Terje Io
+  Copyright (c) 2017-2026 Terje Io
   Copyright (c) 2015-2016 Sungeun K. Jeon for Gnea Research LLC
 
   grblHAL is free software: you can redistribute it and/or modify
@@ -42,7 +42,7 @@
 #else
 #define GRBL_VERSION "1.1f"
 #endif
-#define GRBL_BUILD 20250425
+#define GRBL_BUILD 20260215
 
 #define GRBL_URL "https://github.com/grblHAL"
 
@@ -74,6 +74,10 @@
 #define ISR_FUNC(fn) fn
 #endif
 
+#ifndef __IMXRT1062__
+#define FLASHMEM
+#endif
+
 #ifndef PROGMEM
 #define PROGMEM
 #endif
@@ -90,7 +94,7 @@
 // Do not change unless you know what you are doing!
 
 // Define realtime command special characters. These characters are 'picked-off' directly from the
-// serial read data stream and are not passed to the grbl line execution parser. Select characters
+// serial read data stream and are not passed to the grblHAL line execution parser. Select characters
 // that do not and must not exist in the streamed g-code program. ASCII control characters may be
 // used, if they are available per user setup. Also, extended ASCII codes (>127), which are never in
 // g-code programs, maybe selected for interface programs.
@@ -105,52 +109,51 @@
 #define CMD_FEED_HOLD_LEGACY        '!'
 #define CMD_PROGRAM_DEMARCATION     '%'
 
-// NOTE: All override realtime commands must be in the extended ASCII character set, starting
-// at character value 128 (0x80) and up to 255 (0xFF). If the normal set of realtime commands,
-// such as status reports, feed hold, reset, and cycle start, are moved to the extended set
-// space, protocol.c's protocol_process_realtime() will need to be modified to accommodate the change.
-#define CMD_STATUS_REPORT                   0x80 // TODO: use 0x05 ctrl-E ENQ instead?
-#define CMD_CYCLE_START                     0x81 // TODO: use 0x06 ctrl-F ACK instead? or SYN/DC2/DC3?
-#define CMD_FEED_HOLD                       0x82 // TODO: use 0x15 ctrl-U NAK instead?
-#define CMD_GCODE_REPORT                    0x83
-#define CMD_SAFETY_DOOR                     0x84
-#define CMD_JOG_CANCEL                      0x85
+// NOTE: All realtime commands must be in the extended ASCII character set, starting
+// at character value 128 (0x80) and up to 191 (0xBF). Do not assign values > 191 since those
+// are for the first character in UTF-8 code points.
+#define CMD_STATUS_REPORT                   0x80 // (128) TODO: use 0x05 ctrl-E ENQ instead?
+#define CMD_CYCLE_START                     0x81 // (129) TODO: use 0x06 ctrl-F ACK instead? or SYN/DC2/DC3?
+#define CMD_FEED_HOLD                       0x82 // (130) TODO: use 0x15 ctrl-U NAK instead?
+#define CMD_GCODE_REPORT                    0x83 // (131)
+#define CMD_SAFETY_DOOR                     0x84 // (132)
+#define CMD_JOG_CANCEL                      0x85 // (133)
 //#define CMD_DEBUG_REPORT 0x86 // Only when DEBUG enabled, sends debug report in '{}' braces.
-#define CMD_STATUS_REPORT_ALL               0x87
-#define CMD_OPTIONAL_STOP_TOGGLE            0x88
-#define CMD_SINGLE_BLOCK_TOGGLE             0x89
-#define CMD_OVERRIDE_FAN0_TOGGLE            0x8A //!< Toggle Fan 0 on/off, not implemented by the core.
-#define CMD_MPG_MODE_TOGGLE                 0x8B //!< Toggle MPG mode on/off, not implemented by the core.
-#define CMD_AUTO_REPORTING_TOGGLE           0x8C //!< Toggle auto real time reporting if configured.
-#define CMD_OVERRIDE_FEED_RESET             0x90 //!< Restores feed override value to 100%.
-#define CMD_OVERRIDE_FEED_COARSE_PLUS       0x91
-#define CMD_OVERRIDE_FEED_COARSE_MINUS      0x92
-#define CMD_OVERRIDE_FEED_FINE_PLUS         0x93
-#define CMD_OVERRIDE_FEED_FINE_MINUS        0x94
-#define CMD_OVERRIDE_RAPID_RESET            0x95 //!< Restores rapid override value to 100%.
-#define CMD_OVERRIDE_RAPID_MEDIUM           0x96
-#define CMD_OVERRIDE_RAPID_LOW              0x97
+#define CMD_STATUS_REPORT_ALL               0x87 // (135)
+#define CMD_OPTIONAL_STOP_TOGGLE            0x88 // (136)
+#define CMD_SINGLE_BLOCK_TOGGLE             0x89 // (137)
+#define CMD_OVERRIDE_FAN0_TOGGLE            0x8A //!< (138) Toggle Fan 0 on/off, not implemented by the core.
+#define CMD_MPG_MODE_TOGGLE                 0x8B //!< (139) Toggle MPG mode on/off, available when the MPG stream is enabled with MPG mode 2.
+#define CMD_AUTO_REPORTING_TOGGLE           0x8C //!< (140) Toggle auto real time reporting if configured.
+#define CMD_OVERRIDE_FEED_RESET             0x90 //!< (144) Restores feed override value to 100%.
+#define CMD_OVERRIDE_FEED_COARSE_PLUS       0x91 // (145)
+#define CMD_OVERRIDE_FEED_COARSE_MINUS      0x92 // (146)
+#define CMD_OVERRIDE_FEED_FINE_PLUS         0x93 // (147)
+#define CMD_OVERRIDE_FEED_FINE_MINUS        0x94 // (148)
+#define CMD_OVERRIDE_RAPID_RESET            0x95 //!< (149) Restores rapid override value to 100%.
+#define CMD_OVERRIDE_RAPID_MEDIUM           0x96 // (150)
+#define CMD_OVERRIDE_RAPID_LOW              0x97 // (151)
 // #define CMD_OVERRIDE_RAPID_EXTRA_LOW 0x98 // *NOT SUPPORTED*
-#define CMD_OVERRIDE_SPINDLE_RESET 0x99     // Restores spindle override value to 100%.
-#define CMD_OVERRIDE_SPINDLE_COARSE_PLUS    0x9A
-#define CMD_OVERRIDE_SPINDLE_COARSE_MINUS   0x9B
-#define CMD_OVERRIDE_SPINDLE_FINE_PLUS      0x9C
-#define CMD_OVERRIDE_SPINDLE_FINE_MINUS     0x9D
-#define CMD_OVERRIDE_SPINDLE_STOP           0x9E
-#define CMD_OVERRIDE_COOLANT_FLOOD_TOGGLE   0xA0
-#define CMD_OVERRIDE_COOLANT_MIST_TOGGLE    0xA1
-#define CMD_PID_REPORT                      0xA2
-#define CMD_TOOL_ACK                        0xA3
-#define CMD_PROBE_CONNECTED_TOGGLE          0xA4
+#define CMD_OVERRIDE_SPINDLE_RESET 			0x99 // (153) Restores spindle override value to 100%.
+#define CMD_OVERRIDE_SPINDLE_COARSE_PLUS    0x9A // (154)
+#define CMD_OVERRIDE_SPINDLE_COARSE_MINUS   0x9B // (155)
+#define CMD_OVERRIDE_SPINDLE_FINE_PLUS      0x9C // (156)
+#define CMD_OVERRIDE_SPINDLE_FINE_MINUS     0x9D // (157)
+#define CMD_OVERRIDE_SPINDLE_STOP           0x9E // (158)
+#define CMD_OVERRIDE_COOLANT_FLOOD_TOGGLE   0xA0 // (160)
+#define CMD_OVERRIDE_COOLANT_MIST_TOGGLE    0xA1 // (161)
+#define CMD_PID_REPORT                      0xA2 // (162)
+#define CMD_TOOL_ACK                        0xA3 // (163)
+#define CMD_PROBE_CONNECTED_TOGGLE          0xA4 // (164)
 // The following character codes are reserved for plugin use
-#define CMD_MACRO_0 0xB0
-#define CMD_MACRO_1 0xB1
-#define CMD_MACRO_2 0xB2
-#define CMD_MACRO_3 0xB3
-#define CMD_MACRO_4 0xB4
-#define CMD_MACRO_5 0xB5
-#define CMD_MACRO_6 0xB6
-#define CMD_MACRO_7 0xB7
+#define CMD_MACRO_0 						0xB0 // (176)
+#define CMD_MACRO_1 						0xB1 // (177)
+#define CMD_MACRO_2 						0xB2 // (178)
+#define CMD_MACRO_3 						0xB3 // (179)
+#define CMD_MACRO_4 						0xB4 // (180)
+#define CMD_MACRO_5 						0xB5 // (181)
+#define CMD_MACRO_6 						0xB6 // (182)
+#define CMD_MACRO_7 						0xB7 // (183)
 
 // System motion line numbers must be zero.
 #define JOG_LINE_NUMBER 0
@@ -213,7 +216,9 @@
 // frequencies below 10kHz, where the aliasing between axes of multi-axis motions can cause audible
 // noise and shake your machine. At even lower step frequencies, AMASS adapts and provides even better
 // step smoothing. See stepper.c for more details on the AMASS system works.
-#define ADAPTIVE_MULTI_AXIS_STEP_SMOOTHING  // Default enabled. Comment to disable.
+#ifndef ADAPTIVE_MULTI_AXIS_STEP_SMOOTHING
+#define ADAPTIVE_MULTI_AXIS_STEP_SMOOTHING 1 // Default enabled. Set to 0 to disable.
+#endif
 
 // Define Adaptive Multi-Axis Step-Smoothing(AMASS) levels and cutoff frequencies. The highest level
 // frequency bin starts at 0Hz and ends at its cutoff frequency. The next lower level frequency bin
@@ -224,7 +229,7 @@
 // NOTE: AMASS cutoff frequency multiplied by ISR overdrive factor must not exceed maximum step frequency.
 // NOTE: Current settings are set to overdrive the ISR to no more than 16kHz, balancing CPU overhead
 // and timer accuracy.  Do not alter these settings unless you know what you are doing.
-#ifdef ADAPTIVE_MULTI_AXIS_STEP_SMOOTHING
+#if ADAPTIVE_MULTI_AXIS_STEP_SMOOTHING
   #ifndef MAX_AMASS_LEVEL
     #define MAX_AMASS_LEVEL 3
   #endif

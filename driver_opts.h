@@ -29,6 +29,11 @@
 
 #include "hal.h"
 #include "nuts_bolts.h"
+
+#define MODBUS_RTU_ENABLED     0b001
+#define MODBUS_RTU_DIR_ENABLED 0b010
+#define MODBUS_TCP_ENABLED     0b100
+
 #include "expanders_init.h"
 
 #ifdef OPTS_POSTPROCESSING
@@ -81,9 +86,37 @@
 #define N_GANGED (X_GANGED + Y_GANGED + Z_GANGED)
 #define N_AUTO_SQUARED (X_AUTO_SQUARE + Y_AUTO_SQUARE + Z_AUTO_SQUARE)
 #define N_ABC_MOTORS (N_ABC_AXIS + N_GANGED)
+#define GANGED_MAP (((Z_GANGED<<2)|(Y_GANGED<<1)|X_GANGED)<<N_AXIS)
+#define AUTO_SQUARED_MAP (((Z_AUTO_SQUARE<<2)|(Y_AUTO_SQUARE<<1)|X_AUTO_SQUARE)<<N_AXIS)
 
-#ifndef PROBE_ENABLE
-#define PROBE_ENABLE        1
+#if N_AXIS > 3 || (AUTO_SQUARED_MAP & 8)
+#define M3_LIMIT_ENABLE 1
+#else
+#define M3_LIMIT_ENABLE 0
+#endif
+
+#if N_AXIS > 4 || (AUTO_SQUARED_MAP & 16)
+#define M4_LIMIT_ENABLE 1
+#else
+#define M4_LIMIT_ENABLE 0
+#endif
+
+#if N_AXIS > 5 || (AUTO_SQUARED_MAP & 32)
+#define M5_LIMIT_ENABLE 1
+#else
+#define M5_LIMIT_ENABLE 0
+#endif
+
+#if N_AXIS > 6 || (AUTO_SQUARED_MAP & 64)
+#define M6_LIMIT_ENABLE 1
+#else
+#define M6_LIMIT_ENABLE 0
+#endif
+
+#if N_AXIS > 7 || (AUTO_SQUARED_MAP & 128)
+#define M7_LIMIT_ENABLE 1
+#else
+#define M7_LIMIT_ENABLE 0
 #endif
 
 #ifndef NEOPIXELS_ENABLE
@@ -165,14 +198,6 @@
 #define SPINDLE_SYNC_ENABLE 0
 #endif
 
-#ifndef SPINDLE_ENCODER_ENABLE
-#if SPINDLE_SYNC_ENABLE
-#define SPINDLE_ENCODER_ENABLE  1
-#else
-#define SPINDLE_ENCODER_ENABLE  0
-#endif
-#endif
-
 #ifndef TRINAMIC_ENABLE
   #define TRINAMIC_ENABLE   0
 #endif
@@ -186,7 +211,7 @@
 #else
   #define TRINAMIC_UART_ENABLE 0
 #endif
-#if (TRINAMIC_ENABLE == 2130 || TRINAMIC_ENABLE == 2660 || TRINAMIC_ENABLE == 5160)
+#if (TRINAMIC_ENABLE == 2130 || TRINAMIC_ENABLE == 2240 || TRINAMIC_ENABLE == 2660 || TRINAMIC_ENABLE == 5160)
   #if !defined(TRINAMIC_SPI_ENABLE)
     #define TRINAMIC_SPI_ENABLE  1
   #endif
@@ -246,26 +271,29 @@
   #warning "Enabling ESTOP may not work with all senders!"
 #endif
 
-#define AUX_CONTROL_SPINDLE 0b0001
-#define AUX_CONTROL_COOLANT 0b0010
-#define AUX_CONTROL_DEVICES 0b0100
-#define AUX_CONTROL_INPUTS  0b1000
-
-// Control signals, keep in sync with control_signals_t
-#define CONTROL_RESET       0b0000001
-#define CONTROL_FEEDHOLD    0b0000010
-#define CONTROL_CYCLESTART  0b0000100
-#define CONTROL_SAFETYDOOR  0b0001000
-#define CONTROL_BLOCKDELETE 0b0010000
-#define CONTROL_STOPDISABLE 0b0100000
-#define CONTROL_ESTOP       0b1000000
-
-#ifndef CONTROL_ENABLE
+// Control signals, keep in sync with control_signals_t bit order
+#define CONTROL_RESET       (1<<0)
+#define CONTROL_FEED_HOLD   (1<<1)
+#define CONTROL_CYCLE_START (1<<2)
+#define CONTROL_ESTOP       (1<<6)
 #if ESTOP_ENABLE
-#define CONTROL_ENABLE      (CONTROL_FEEDHOLD|CONTROL_CYCLESTART|CONTROL_ESTOP)
+#define CONTROL_HALT CONTROL_ESTOP
 #else
-#define CONTROL_ENABLE      (CONTROL_RESET|CONTROL_FEEDHOLD|CONTROL_CYCLESTART)
+#define CONTROL_HALT CONTROL_RESET
 #endif
+
+// Probe signals
+
+#ifndef PROBE_ENABLE
+#define PROBE_ENABLE        1
+#endif
+
+#ifndef PROBE2_ENABLE
+#define PROBE2_ENABLE       0
+#endif
+
+#ifndef TOOLSETTER_ENABLE
+#define TOOLSETTER_ENABLE   0
 #endif
 
 // Coolant signals, keep in sync with coolant_state_t
@@ -393,10 +421,6 @@
   #endif
 #endif
 
-#define MODBUS_RTU_ENABLED     0b001
-#define MODBUS_RTU_DIR_ENABLED 0b010
-#define MODBUS_TCP_ENABLED     0b100
-
 #if MODBUS_ENABLE == 2
 #undef MODBUS_ENABLE
 #define MODBUS_ENABLE 0b011
@@ -416,6 +440,14 @@
   #else
     #define STEP_INJECT_ENABLE 0
   #endif
+#endif
+
+#ifndef SPINDLE_ENCODER_ENABLE
+#if SPINDLE_SYNC_ENABLE && !(SPINDLE_ENABLE & (1 << SPINDLE_STEPPER))
+#define SPINDLE_ENCODER_ENABLE  1
+#else
+#define SPINDLE_ENCODER_ENABLE  0
+#endif
 #endif
 
 #ifndef QEI_ENABLE
@@ -692,14 +724,6 @@
 #define FS_ENABLE (FS_SDCARD|FS_FATFS|FS_YMODEM)
 #else
 #define FS_ENABLE 0
-#endif
-
-#ifndef SPI_ENABLE
-#if SDCARD_ENABLE || TRINAMIC_SPI_ENABLE
-#define SPI_ENABLE 1
-#else
-#define SPI_ENABLE 0
-#endif
 #endif
 
 /*EOF*/

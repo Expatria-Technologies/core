@@ -234,7 +234,7 @@ static float *delta_segment_line (float *target, float *position, plan_line_data
 
             if(!pl_data->condition.target_validated) {
                 pl_data->condition.target_validated = On;
-                pl_data->condition.target_valid = grbl.check_travel_limits(mpos.values, sys.soft_limits, false);
+                pl_data->condition.target_valid = grbl.check_travel_limits(mpos.values, sys.soft_limits, false, &sys.work_envelope);
             }
 
             transform_to_cartesian(segment_target.values, position);
@@ -576,14 +576,14 @@ static inline bool pos_ok (coord_data_t *pos)
 }
 
 // Checks and reports if target array exceeds machine travel limits. Returns false if check failed.
-static bool delta_check_travel_limits (float *target, axes_signals_t axes, bool is_cartesian)
+static bool delta_check_travel_limits (float *target, axes_signals_t axes, bool is_cartesian, work_envelope_t *envelope)
 {
     bool failed = false;
     uint_fast8_t idx = N_AXIS;
     coord_data_t pos;
 
 #if N_AXIS > 3
-    if((axes.mask & ~0b111) && !check_travel_limits(target, (axes_signals_t){ axes.mask & ~0b111 }, is_cartesian))
+    if((axes.mask & ~0b111) && !check_travel_limits(target, (axes_signals_t){ axes.mask & ~0b111 }, is_cartesian, envelope))
         return false;
 #endif
 
@@ -607,7 +607,7 @@ static bool delta_check_travel_limits (float *target, axes_signals_t axes, bool 
         idx--;
         if(bit_istrue(sys.homed.mask, bit(idx)) && settings.axis[idx].max_travel < -0.0f) {
             if(idx > Z_AXIS)
-                failed = target[idx] < sys.work_envelope.min.values[idx] || target[idx] > sys.work_envelope.max.values[idx];
+                failed = target[idx] < envelope->min.values[idx] || target[idx] > envelope->max.values[idx];
             else
                 failed = pos.values[idx] < machine.min_angle[idx] || pos.values[idx] > machine.max_angle[idx];
         }
@@ -616,13 +616,13 @@ static bool delta_check_travel_limits (float *target, axes_signals_t axes, bool 
     return !failed;
 }
 
-static void delta_apply_travel_limits (float *target, float *position)
+static void delta_apply_travel_limits (float *target, float *position, work_envelope_t *envelope)
 {
     if(sys.homed.mask == 0)
         return;
 
     if(machine.cfg.flags.limit_to_cuboid)
-        apply_travel_limits(target, position);
+        apply_travel_limits(target, position, envelope);
 
     else if(position && !is_target_inside_cuboid(target, true)) {
 
@@ -728,11 +728,11 @@ static const char *delta_set_axis_setting_unit (setting_id_t setting_id, uint_fa
     return unit == NULL && on_set_axis_setting_unit != NULL ? on_set_axis_setting_unit(setting_id, axis_idx) : unit;
 }
 
-static const setting_group_detail_t kinematics_groups [] = {
+PROGMEM static const setting_group_detail_t kinematics_groups [] = {
     { Group_Root, Group_Kinematics, "Delta robot"}
 };
 
-static const setting_detail_t kinematics_settings[] = {
+PROGMEM static const setting_detail_t kinematics_settings[] = {
     { Setting_Kinematics0, Group_Kinematics, "Segment length", "mm", Format_Decimal, "0.00", NULL, NULL, Setting_NonCore, &delta_settings.sl, NULL, NULL },
     { Setting_Kinematics1, Group_Kinematics, "Forearm length", "mm", Format_Decimal, "###0.000", NULL, NULL, Setting_NonCore, &delta_settings.re, NULL, NULL },
     { Setting_Kinematics2, Group_Kinematics, "Bicep length", "mm", Format_Decimal, "##0.000", NULL, NULL, Setting_NonCore, &delta_settings.rf, NULL, NULL },
@@ -744,9 +744,7 @@ static const setting_detail_t kinematics_settings[] = {
     { Setting_Kinematics8, Group_Kinematics, "Max angle", "deg", Format_Decimal, "-#0.000", "-90", "135", Setting_NonCore, &delta_settings.max_angle, NULL, NULL },
 };
 
-#ifndef NO_SETTINGS_DESCRIPTIONS
-
-static const setting_descr_t kinematics_settings_descr[] = {
+PROGMEM static const setting_descr_t kinematics_settings_descr[] = {
     { Setting_Kinematics0, "Size that moves are broken up into to compensate for the non-linear movement of a delta robot." },
     { Setting_Kinematics1, "Forearm length is the length of the connecting rod in millimeters." },
     { Setting_Kinematics2, "Bicep length is the length of the driven arm in millimeters." },
@@ -755,8 +753,6 @@ static const setting_descr_t kinematics_settings_descr[] = {
     { Setting_Kinematics6, "Home position in degrees from biceps paralell to the floor." },
     { Setting_Kinematics8, "Max travel in degrees from biceps paralell to the floor. Set to 0 to use calculated max." }
 };
-
-#endif
 
 static void delta_settings_changed (settings_t *settings, settings_changed_flags_t changed)
 {
@@ -888,10 +884,8 @@ void delta_robot_init (void)
         .n_groups = sizeof(kinematics_groups) / sizeof(setting_group_detail_t),
         .settings = kinematics_settings,
         .n_settings = sizeof(kinematics_settings) / sizeof(setting_detail_t),
-    #ifndef NO_SETTINGS_DESCRIPTIONS
         .descriptions = kinematics_settings_descr,
         .n_descriptions = sizeof(kinematics_settings_descr) / sizeof(setting_descr_t),
-    #endif
         .load = delta_settings_load,
         .restore = delta_settings_restore,
         .save = delta_settings_save,

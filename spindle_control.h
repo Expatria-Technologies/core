@@ -127,6 +127,15 @@ typedef enum {
     SpindleHAL_Active,      //!< 2
 } spindle_hal_t;
 
+/*!  Modal Group G14: Spindle Speed Mode
+
+Do not alter values!
+*/
+typedef enum {
+    SpindleSpeedMode_RPM = 0,  //!< 0 - G97 - Default, must be zero
+    SpindleSpeedMode_CSS = 1   //!< 1 - G96
+} spindle_rpm_mode_t;
+
 struct spindle_ptrs;    // members defined below
 struct spindle_pwm;     // members defined below
 struct spindle_param;   // members defined below
@@ -209,7 +218,9 @@ typedef union {
         uint8_t enable_rpm_controlled :1, // PWM spindle only
                 laser_mode_disable    :1, // PWM spindle only
                 pwm_disable           :1, // PWM spindle only
-                unassigned            :5;
+                g92offset             :1,
+                pwm_ramped            :1, // PWM spindle only
+                unassigned            :3;
     };
 } spindle_settings_flags_t;
 
@@ -262,7 +273,7 @@ typedef union {
                 laser_mode_disable  :1,
                 laser_off_overdrive :1,
                 enable_out          :1,
-                unused              :1;
+                ramp_pwm            :1;
     };
 } spindle_pwm_flags_t;
 
@@ -337,6 +348,8 @@ typedef struct spindle_param {
     spindle_state_t state;
     override_t override_pct;    //!< Spindle RPM override value in percent
     spindle_css_data_t css;     //!< Data used for Constant Surface Speed Mode (CSS) calculations, NULL if not in CSS mode.
+    bool ramp_up;
+    bool ramp_down;
     spindle_ptrs_t *hal;
 } spindle_param_t;
 
@@ -361,13 +374,15 @@ typedef struct  {
 */
 typedef bool (*spindle_enumerate_callback_ptr)(spindle_info_t *spindle, void *data);
 
-void spindle_set_override (spindle_ptrs_t *spindle, override_t speed_override);
+float spindle_set_override (spindle_ptrs_t *spindle, override_t speed_override);
+
+bool spindle_override_disable (spindle_ptrs_t *spindle, bool disable);
 
 // Sets spindle running state with direction, enable, and spindle RPM.
 bool spindle_set_state (spindle_ptrs_t *spindle, spindle_state_t state, float rpm);
 
 // Called by g-code parser when setting spindle state and requires a buffer sync.
-bool spindle_set_state_synced (spindle_ptrs_t *spindle, spindle_state_t state, float rpm);
+bool spindle_set_state_synced (spindle_ptrs_t *spindle, spindle_state_t state, float rpm, spindle_rpm_mode_t mode);
 
 bool spindle_check_state (spindle_ptrs_t *spindle, spindle_state_t state);
 
@@ -377,7 +392,7 @@ float spindle_set_rpm (spindle_ptrs_t *spindle, float rpm, override_t speed_over
 // Restore spindle running state with direction, enable, spindle RPM and appropriate delay.
 bool spindle_restore (spindle_ptrs_t *spindle, spindle_state_t state, float rpm, uint16_t on_delay_ms);
 
-void spindle_all_off (void);
+void spindle_all_off (bool reset);
 
 //
 // The following functions are not called by the core, may be called by driver code.

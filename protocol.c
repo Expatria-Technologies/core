@@ -3,7 +3,7 @@
 
   Part of grblHAL
 
-  Copyright (c) 2017-2025 Terje Io
+  Copyright (c) 2017-2026 Terje Io
   Copyright (c) 2011-2016 Sungeun K. Jeon for Gnea Research LLC
   Copyright (c) 2009-2011 Simen Svale Skogsrud
 
@@ -59,7 +59,7 @@ static bool keep_rt_commands = false;
 static void protocol_exec_rt_suspend (sys_state_t state);
 
 // add gcode to execute not originating from normal input stream
-bool protocol_enqueue_gcode (char *gcode)
+FLASHMEM bool protocol_enqueue_gcode (char *gcode)
 {
     bool ok = xcommand[0] == '\0' &&
                (state_get() == STATE_IDLE || (state_get() & (STATE_ALARM|STATE_JOG|STATE_TOOL_CHANGE))) &&
@@ -74,7 +74,7 @@ bool protocol_enqueue_gcode (char *gcode)
     return ok;
 }
 
-static bool recheck_line (char *line, line_flags_t *flags)
+FLASHMEM static bool recheck_line (char *line, line_flags_t *flags)
 {
     bool keep_rt_commands = false, first_char = true;
 
@@ -173,16 +173,21 @@ bool protocol_main_loop (void)
             protocol_execute_realtime(); // Enter safety door mode. Should return as IDLE state.
         }
 #endif
-        // All systems go!
-        task_add_immediate(system_execute_startup, NULL); // Schedule startup script for execution.
+        if(sys.alarm_pending)
+            system_raise_alarm(sys.alarm_pending);
+        else {
+            // All systems go!
+            if(!settings.homing.flags.nx_scrips_on_homed_only)
+                task_add_immediate(system_execute_startup, NULL); // Schedule startup script for execution.
+        }
     }
 
     // Ensure spindle and coolant is switched off on a cold start
     if(sys.cold_start) {
-        spindle_all_off();
+        spindle_all_off(true);
         hal.coolant.set_state((coolant_state_t){0});
         sys.cold_start = false;
-		system_set_exec_state_flag(EXEC_RT_COMMAND);  // execute any statup up tasks
+		system_set_exec_state_flag(EXEC_RT_COMMAND);  // execute any startup up tasks
     }
 
     // ---------------------------------------------------------------------------------
@@ -190,7 +195,7 @@ bool protocol_main_loop (void)
     // This is also where grblHAL idles while waiting for something to do.
     // ---------------------------------------------------------------------------------
 
-    int16_t c;
+    int32_t c;
     char eol = '\0';
     line_flags_t line_flags = {0};
 
@@ -363,10 +368,8 @@ bool protocol_buffer_synchronize (void)
 
     // If system is queued, ensure cycle resumes if the auto start flag is present.
     protocol_auto_cycle_start();
-
-    sys.flags.synchronizing = gc_state.modal.program_flow == ProgramFlow_Running;
-    while ((ok = protocol_execute_realtime()) && (plan_get_current_block() || state_get() == STATE_CYCLE));
-    sys.flags.synchronizing = Off;
+    
+    while((ok = protocol_execute_realtime()) && (plan_get_current_block() || state_get() == STATE_CYCLE));
 
     return ok;
 }
@@ -389,7 +392,7 @@ void protocol_auto_cycle_start (void)
 // from various check points in the main program, primarily where there may be a while loop waiting
 // for a buffer to clear space or any point where the execution time from the last check point may
 // be more than a fraction of a second. This is a way to execute realtime commands asynchronously
-// (aka multitasking) with grbl's g-code parsing and planning functions. This function also serves
+// (aka multitasking) with grblHAL's g-code parsing and planning functions. This function also serves
 // as an interface for the interrupts to set the system realtime flags, where only the main program
 // handles them, removing the need to define more computationally-expensive volatile variables. This
 // also provides a controlled way to execute certain tasks without having two or more instances of
@@ -415,7 +418,7 @@ bool protocol_execute_realtime (void)
     return !ABORTED;
 }
 
-static void protocol_poll_cmd (void)
+FLASHMEM static void protocol_poll_cmd (void)
 {
     int16_t c;
 
@@ -450,7 +453,7 @@ bool protocol_exec_rt_system (void)
         if((sys.reset_pending = bit_istrue(sys.rt_exec_state, EXEC_RESET))) {
             // Kill spindle and coolant.
             killed = true;
-            spindle_all_off();
+            spindle_all_off(true);
             hal.coolant.set_state((coolant_state_t){0});
         }
 
@@ -463,10 +466,7 @@ bool protocol_exec_rt_system (void)
             hal.driver_reset();
 
         // Halt everything upon a critical event flag. Currently hard and soft limits flag this.
-        if((sys.blocking_event = (alarm_code_t)rt_exec == Alarm_HardLimit ||
-                                  (alarm_code_t)rt_exec == Alarm_SoftLimit ||
-                                   (alarm_code_t)rt_exec == Alarm_EStop ||
-                                    (alarm_code_t)rt_exec == Alarm_MotorFault)) {
+        if((sys.blocking_event = alarm_is_critical((alarm_code_t)rt_exec))) {
 
             static const control_signals_t blocking_signals = { .e_stop = On, .motor_fault = On };
 
@@ -503,7 +503,7 @@ bool protocol_exec_rt_system (void)
 
                 if(bit_istrue(sys.rt_exec_state, EXEC_STATUS_REPORT)) {
                     system_clear_exec_state_flag(EXEC_STATUS_REPORT);
-                    report_realtime_status();
+                    report_realtime_status(hal.stream.write_all, &hal.stream.report);
                 }
 
                 protocol_poll_cmd();
@@ -523,7 +523,7 @@ bool protocol_exec_rt_system (void)
 
             if(!killed) {
                 // Kill spindle and coolant.
-                spindle_all_off();
+                spindle_all_off(true);
                 hal.coolant.set_state((coolant_state_t){0});
             }
 
@@ -566,11 +566,10 @@ bool protocol_exec_rt_system (void)
 
             sys.flags.keep_input = Off;
 
-            if(sys.alarm_pending != Alarm_None) {
+            if(sys.alarm_pending) {
 
                 sys.position_lost = st_is_stepping();
                 system_raise_alarm(sys.alarm_pending);
-                sys.alarm_pending = Alarm_None;
 
             } else if(st_is_stepping()) {
 
@@ -603,10 +602,10 @@ bool protocol_exec_rt_system (void)
 
         // Execute and print status to output stream
         if (rt_exec & EXEC_STATUS_REPORT)
-            report_realtime_status();
+            report_realtime_status(hal.stream.write_all, &hal.stream.report);
 
         if(rt_exec & EXEC_GCODE_REPORT)
-            report_gcode_modes();
+            report_gcode_modes(hal.stream.write);
 
         if(rt_exec & EXEC_TLO_REPORT)
             report_tool_offsets();
@@ -783,7 +782,7 @@ bool protocol_exec_rt_system (void)
 // whatever function that invoked the suspend, such that grblHAL resumes normal operation.
 // This function is written in a way to promote custom parking motions. Simply use this as a
 // template.
-static void protocol_exec_rt_suspend (sys_state_t state)
+FLASHMEM static void protocol_exec_rt_suspend (sys_state_t state)
 {
     if((sys.blocking_event = state == STATE_SLEEP)) {
         *line = '\0';
@@ -820,11 +819,12 @@ static void protocol_exec_rt_suspend (sys_state_t state)
 // These characters are not passed into the main buffer,
 // but rather sets system state flag bits for later execution by protocol_exec_rt_system().
 // Called from input stream interrupt handler.
-ISR_CODE bool ISR_FUNC(protocol_enqueue_realtime_command)(char c)
+ISR_CODE bool ISR_FUNC(protocol_enqueue_realtime_command)(uint8_t c)
 {
     static bool esc = false;
 
     bool drop = false;
+    control_signals_t signals = {};
 
     // 1. Process characters in the ranges 0x - 1x and 8x-Ax
     // Characters with functions assigned are always acted upon even when the input stream
@@ -863,15 +863,7 @@ ISR_CODE bool ISR_FUNC(protocol_enqueue_realtime_command)(char c)
 #endif
 
         case CMD_STATUS_REPORT_ALL: // Add all statuses to report
-            {
-                report_tracking_flags_t report;
-
-                report.value = (uint32_t)Report_All;
-                report.tool_offset = sys.report.tool_offset;
-                report.m66result = sys.var5399 > -2;
-
-                system_add_rt_report((report_tracking_t)report.value);
-            }
+            hal.stream.report.flags.value = report_get_rt_flags_all().value;
             system_set_exec_state_flag(EXEC_STATUS_REPORT);
             drop = true;
             break;
@@ -884,12 +876,7 @@ ISR_CODE bool ISR_FUNC(protocol_enqueue_realtime_command)(char c)
             break;
 
         case CMD_CYCLE_START:
-            system_set_exec_state_flag(EXEC_CYCLE_START);
-            // Cancel any pending tool change
-            gc_state.tool_change = false;
-            drop = true;
-            if(grbl.on_cycle_start)
-                grbl.on_cycle_start();
+            signals.cycle_start = On;
             break;
 
         case CMD_FEED_HOLD:
@@ -898,9 +885,9 @@ ISR_CODE bool ISR_FUNC(protocol_enqueue_realtime_command)(char c)
             break;
 
         case CMD_SAFETY_DOOR:
-            if(state_get() != STATE_SAFETY_DOOR) {
+            if((drop = state_get() != STATE_SAFETY_DOOR)) {
+            	sys.flags.is_parking = settings.parking.flags.enabled;
                 system_set_exec_state_flag(EXEC_SAFETY_DOOR);
-                drop = true;
             }
             break;
 
@@ -922,17 +909,17 @@ ISR_CODE bool ISR_FUNC(protocol_enqueue_realtime_command)(char c)
             break;
 
         case CMD_PROBE_CONNECTED_TOGGLE:
-            if(hal.probe.connected_toggle)
-                hal.probe.connected_toggle();
+            if((drop = !!hal.probe.connected_toggle))
+                task_add_immediate(probe_connected_event, (void *)2);
             break;
 
         case CMD_OPTIONAL_STOP_TOGGLE:
-            if(!hal.signals_cap.stop_disable) // Not available as realtime command if HAL supports physical switch
+            if((drop = (signals.stop_disable = !hal.signals_cap.stop_disable))) // Not available as realtime command if HAL supports physical switch
                 sys.flags.optional_stop_disable = !sys.flags.optional_stop_disable;
             break;
 
         case CMD_SINGLE_BLOCK_TOGGLE:
-            if(!hal.signals_cap.single_block) // Not available as realtime command if HAL supports physical switch
+            if((drop = (signals.single_block = !hal.signals_cap.single_block))) // Not available as realtime command if HAL supports physical switch
                 sys.flags.single_block = !sys.flags.single_block;
             break;
 
@@ -986,7 +973,7 @@ ISR_CODE bool ISR_FUNC(protocol_enqueue_realtime_command)(char c)
             break;
 
         default:
-            if((c < ' ' && c != ASCII_BS) || (c > ASCII_DEL && c <= 0xBF))
+            if(((unsigned char)c < ' ' && c != ASCII_BS) || ((unsigned char)c > ASCII_DEL && (unsigned char)c <= 0xBF))
                 drop = grbl.on_unknown_realtime_cmd == NULL || grbl.on_unknown_realtime_cmd(c);
             break;
     }
@@ -1005,14 +992,7 @@ ISR_CODE bool ISR_FUNC(protocol_enqueue_realtime_command)(char c)
             break;
 
         case CMD_CYCLE_START_LEGACY:
-            if(!keep_rt_commands || settings.flags.legacy_rt_commands) {
-                system_set_exec_state_flag(EXEC_CYCLE_START);
-                // Cancel any pending tool change
-                gc_state.tool_change = false;
-                drop = true;
-                if(grbl.on_cycle_start)
-                    grbl.on_cycle_start();
-            }
+            signals.cycle_start = !keep_rt_commands || settings.flags.legacy_rt_commands;
             break;
 
         case CMD_FEED_HOLD_LEGACY:
@@ -1028,6 +1008,21 @@ ISR_CODE bool ISR_FUNC(protocol_enqueue_realtime_command)(char c)
     }
 
     esc = c == ASCII_ESC;
+
+    if(signals.bits) {
+
+        if(grbl.on_control_signals_changed)
+            grbl.on_control_signals_changed(signals);
+
+        if(signals.cycle_start) {
+            system_set_exec_state_flag(EXEC_CYCLE_START);
+            // Cancel any pending tool change
+            gc_state.tool_change = false;
+            drop = true;
+            if(grbl.on_cycle_start)
+                grbl.on_cycle_start();
+        }
+    }
 
     return drop;
 }

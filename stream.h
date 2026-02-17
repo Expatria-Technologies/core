@@ -3,7 +3,7 @@
 
   Part of grblHAL
 
-  Copyright (c) 2019-2025 Terje Io
+  Copyright (c) 2019-2026 Terje Io
 
   grblHAL is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -91,14 +91,117 @@ typedef enum {
     StreamType_Null
 } stream_type_t;
 
+typedef enum {
+    StreamSuspend_Off = 0,
+    StreamSuspend_Pending,
+    StreamSuspend_Active
+} stream_suspend_state_t;
+
+typedef enum {
+    Serial_8bit = 0,
+    Serial_7bit
+} serial_width_t;
+
+typedef enum {
+    Serial_StopBits1 = 0,
+    Serial_StopBits1_5,
+    Serial_StopBits2,
+    Serial_StopBits0_5,
+} serial_stopbits_t;
+
+typedef enum {
+    Serial_ParityNone = 0,
+    Serial_ParityEven,
+    Serial_ParityOdd,
+    Serial_ParityMark,
+    Serial_ParitySpace,
+} serial_parity_t;
+
+typedef union {
+    uint8_t value;
+    struct {
+        uint8_t width    :2,
+                stopbits :2,
+                parity   :3,
+                unused   :1;
+    };
+} serial_format_t;
+
 typedef union {
     uint8_t value;
     struct {
         uint8_t dtr    :1,
+                dsr    :1,
                 rts    :1,
-                unused :6;
+                cts    :1,
+                unused :4;
     };
 } serial_linestate_t;
+
+typedef enum {
+    Report_ClearAll = 0,
+    Report_MPGMode = (1 << 0),
+    Report_Scaling = (1 << 1),
+    Report_Homed   = (1 << 2),
+    Report_LatheXMode = (1 << 3),
+    Report_Spindle = (1 << 4),
+    Report_Coolant = (1 << 5),
+    Report_Overrides = (1 << 6),
+    Report_Tool = (1 << 7),
+    Report_WCO = (1 << 8),
+    Report_GWCO = (1 << 9),
+    Report_ToolOffset = (1 << 10),
+    Report_M66Result = (1 << 11),
+    Report_PWM = (1 << 12),
+    Report_Motor = (1 << 13),
+    Report_Encoder = (1 << 14),
+    Report_TLOReference = (1 << 15),
+    Report_Fan = (1 << 16),
+    Report_SpindleId = (1 << 17),
+    Report_ProbeId = (1 << 18),
+    Report_DistanceToGo = (1 << 19),
+    Report_ProbeProtect = (1 << 20),
+    Report_ForceWCO = (1 << 29),
+    Report_CycleStart = (1 << 30),
+    Report_All = 0x801FFFFF
+} report_tracking_t;
+
+typedef union {
+    uint32_t value;
+    struct {
+        uint32_t mpg_mode       :1, //!< MPG mode changed.
+                 scaling        :1, //!< Scaling (G50/G51) changed.
+                 homed          :1, //!< Homed state changed.
+                 xmode          :1, //!< Lathe radius/diameter mode changed.
+                 spindle        :1, //!< Spindle state changed.
+                 coolant        :1, //!< Coolant state changed.
+                 overrides      :1, //!< Overrides changed.
+                 tool           :1, //!< Tool changed.
+                 wco            :1, //!< Add work coordinates.
+                 gwco           :1, //!< Add work coordinate.
+                 tool_offset    :1, //!< Tool offsets changed.
+                 m66result      :1, //!< M66 result updated.
+                 pwm            :1, //!< Add PWM information (optional: to be added by driver).
+                 motor          :1, //!< Add motor information (optional: to be added by driver).
+                 encoder        :1, //!< Add encoder information (optional: to be added by driver).
+                 tlo_reference  :1, //!< Tool length offset reference changed.
+                 fan            :1, //!< Fan on/off changed.
+                 spindle_id     :1, //!< Spindle changed.
+                 probe_id       :1, //!< Probe changed.
+                 distance_to_go :1, //!< Distance to go.
+                 probe_protect  :1, //!< Probe protection state changed.
+                 unassigned     :8, //
+                 force_wco      :1, //!< Add work coordinates (due to WCO changed during motion).
+                 cycle_start    :1, //!< Cycle start signal triggered. __NOTE:__ do __NOT__ add to Report_All enum above!
+                 all            :1; //!< Set when CMD_STATUS_REPORT_ALL is requested, may be used by user code.
+    };
+} report_tracking_flags_t;
+
+typedef struct {
+    report_tracking_flags_t flags;
+    uint8_t override_counter;       //!< Tracks when to add override data to status reports.
+    uint8_t wco_counter;            //!< Tracks when to add work coordinate offset data to status reports.
+} status_report_tracking_t;
 
 /*! \brief Pointer to function for getting stream connected status.
 \returns \a true connected, \a false otherwise.
@@ -113,7 +216,7 @@ typedef uint16_t (*get_stream_buffer_count_ptr)(void);
 /*! \brief Pointer to function for reading a single character from a input stream.
 \returns character or -1 if none available.
 */
-typedef int16_t (*stream_read_ptr)(void);
+typedef int32_t (*stream_read_ptr)(void);
 
 /*! \brief Pointer to function for writing a null terminated string to the output stream.
 \param s pointer to null terminated string.
@@ -126,21 +229,25 @@ typedef void (*stream_write_ptr)(const char *s);
 \param s pointer to string.
 \param len number of characters to write.
 */
-typedef void (*stream_write_n_ptr)(const char *s, uint16_t len);
+typedef void (*stream_write_n_ptr)(const uint8_t *s, uint16_t len);
 
 
 /*! \brief Pointer to function for writing a single character to the output stream.
 \param c the character to write.
 */
-typedef bool (*stream_write_char_ptr)(const char c);
+typedef bool (*stream_write_char_ptr)(const uint8_t c);
 
 /*! \brief Pointer to function for extracting real-time commands from the input stream and enqueue them for processing.
 This should be called by driver code prior to inserting a character into the input buffer.
 \param c character to check.
 \returns true if extracted, driver code should not insert the character into the input buffer if so.
 */
-typedef bool (*enqueue_realtime_command_ptr)(char c);
+typedef bool (*enqueue_realtime_command_ptr)(uint8_t c);
 
+/*! \brief Pointer to function for setting the transfer direction control signal for half-duplex connections (RS-485).
+\param tx \a true when transmitting, \a false when receiving.
+*/
+typedef void (*stream_set_direction_ptr)(bool tx);
 
 /*! \brief Optional, but recommended, pointer to function for enqueueing realtime command characters.
 \param c character to enqueue.
@@ -150,7 +257,7 @@ __NOTE:__ Stream implementations should pass the character over the current hand
 
 User or plugin code should __not__ enqueue realtime command characters via this handler, it should call \a grbl.enqueue_realtime_command() instead.
 */
-typedef bool (*enqueue_realtime_command2_ptr)(char c);
+typedef bool (*enqueue_realtime_command2_ptr)(uint8_t c);
 
 
 /*! \brief Pointer to function for setting the enqueue realtime commands handler.
@@ -162,6 +269,11 @@ set it to protocol_enqueue_realtime_command() on initialization.
 */
 typedef enqueue_realtime_command_ptr (*set_enqueue_rt_handler_ptr)(enqueue_realtime_command_ptr handler);
 
+/*! \brief Pointer to function for setting the stream format.
+\param format a \a serial_format_t struct.
+\returns true if successful.
+*/
+typedef bool (*set_format_ptr)(serial_format_t format);
 
 /*! \brief Pointer to function for setting the stream baud rate.
 \param baud_rate
@@ -225,18 +337,22 @@ typedef union {
                 rx_only       :1,
                 modbus_ready  :1,
                 rts_handshake :1,
-                unused        :2;
+                init_ok       :1,
+                unused        :1;
     };
 } io_stream_flags_t;
 
 typedef union {
     uint8_t value;
     struct {
-        uint8_t webui_connected :1,
-                is_usb          :1,
-                linestate_event :1, //!< Set when driver supports on_linestate_changed event.
-                passthru        :1, //!< Set when stream is in passthru mode.
-                unused          :4;
+        uint8_t webui_connected   :1,
+                is_usb            :1,
+                linestate_event   :1, //!< Set when driver supports on_linestate_changed event.
+                passthru          :1, //!< Set when stream is in passthru mode.
+                utf8              :1, //!< Set when stream is in UTF8 mode.
+                eof               :1, //!< Set when a file stream reaches end-of-file.
+                m98_macro_prescan :1, //!< Set when prescanning gcode for M98 macro definitions.
+                unused            :1;
     };
 } io_stream_state_t;
 
@@ -259,23 +375,37 @@ typedef struct {
     stream_write_n_ptr write_n;                             //!< Optional handler for writing n characters to current output stream only. Required for Modbus support.
     disable_rx_stream_ptr disable_rx;                       //!< Optional handler for disabling/enabling a stream. Recommended?
     get_stream_buffer_count_ptr get_rx_buffer_count;        //!< Optional handler for getting number of characters in the input buffer.
-    get_stream_buffer_count_ptr get_tx_buffer_count;        //!< Optional handler for getting number of characters in the output buffer(s). Count shall include any unsent characters in any transmit FIFO and/or transmit register. Required for Modbus support.
-    flush_stream_buffer_ptr reset_write_buffer;             //!< Optional handler for flushing the output buffer. Any transmit FIFO shall be flushed as well. Required for Modbus support.
-    set_baud_rate_ptr set_baud_rate;                        //!< Optional handler for setting the stream baud rate. Required for Modbus support, recommended for Bluetooth support.
+    get_stream_buffer_count_ptr get_tx_buffer_count;        //!< Optional handler for getting number of characters in the output buffer(s). Count shall include any unsent characters in any transmit FIFO and/or transmit register. Required for Modbus/RS-485 support.
+    flush_stream_buffer_ptr reset_write_buffer;             //!< Optional handler for flushing the output buffer. Any transmit FIFO shall be flushed as well. Required for Modbus/RS-485 support.
+    set_baud_rate_ptr set_baud_rate;                        //!< Optional handler for setting the stream baud rate. Required for Modbus/RS-485 support, recommended for Bluetooth support.
+    set_format_ptr set_format;                              //!< Optional handler for setting the stream format.
+    stream_set_direction_ptr set_direction;                 //!< Optional handler for setting the transfer direction for half-duplex communication.
     on_linestate_changed_ptr on_linestate_changed;          //!< Optional handler to be called when line state changes. Set by client.
+    status_report_tracking_t report;                        //!< Tracks when to add data to status reports.
     vfs_file_t *file;                                       //!< File handle, non-null if streaming from a file.
 } io_stream_t;
 
+typedef struct {
+    io_stream_state_t state;                                //!< Optional status flags such as connected status.
+    io_stream_flags_t flags;                                //!< Stream capability flags.
+    uint32_t baud_rate;
+    serial_format_t format;
+} io_stream_status_t;
+
 typedef const io_stream_t *(*stream_claim_ptr)(uint32_t baud_rate);
+typedef bool (*stream_release_ptr)(uint8_t instance);
+typedef const io_stream_status_t *(*stream_get_status_ptr)(uint8_t instance);
 
 typedef struct {
     stream_type_t type;                                     //!< Type of stream.
     uint8_t instance;                                       //!< Instance of stream type, starts from 0.
     io_stream_flags_t flags;
     stream_claim_ptr claim;
+    stream_release_ptr release;
+    stream_get_status_ptr get_status;                       //!< Optional handler for getting stream status, for UART streams only
 } io_stream_properties_t;
 
-typedef bool (*stream_enumerate_callback_ptr)(io_stream_properties_t const *properties);
+typedef bool (*stream_enumerate_callback_ptr)(io_stream_properties_t const *properties, void *data);
 
 typedef struct io_stream_details {
     uint8_t n_streams;
@@ -291,47 +421,54 @@ typedef struct {
     volatile bool rts_state;
     bool overflow;
     bool backup;
-    char data[RX_BUFFER_SIZE];
+    uint8_t data[RX_BUFFER_SIZE];
 } stream_rx_buffer_t;
 
 typedef struct {
     volatile uint_fast16_t head;
     volatile uint_fast16_t tail;
-    char data[TX_BUFFER_SIZE];
+    uint8_t data[TX_BUFFER_SIZE];
 } stream_tx_buffer_t;
 
 typedef struct {
     uint_fast16_t length;
     uint_fast16_t max_length;
-    char *s;
-    char data[BLOCK_TX_BUFFER_SIZE];
+    uint8_t *s;
+    uint8_t data[BLOCK_TX_BUFFER_SIZE];
 } stream_block_tx_buffer_t;
 
 // double buffered tx stream
 typedef struct {
     uint_fast16_t length;
     uint_fast16_t max_length;
-    char *s;
+    uint8_t *s;
     bool use_tx2data;
-    char data[BLOCK_TX_BUFFER_SIZE];
-    char data2[BLOCK_TX_BUFFER_SIZE];
+    uint8_t data[BLOCK_TX_BUFFER_SIZE];
+    uint8_t data2[BLOCK_TX_BUFFER_SIZE];
 } stream_block_tx_buffer2_t;
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+static inline bool stream_is_uart (stream_type_t type)
+{
+    return type == StreamType_Serial || type == StreamType_Bluetooth;
+}
+
 /*! \brief Dummy function for reading data from a virtual empty input buffer.
 \returns always -1 as there is no data available.
 */
-int16_t stream_get_null (void);
+int32_t stream_get_null (void);
 
 /*! \brief Function for blocking reads from or restoring an input buffer.
 \param rxbuffer pointer to a stream_rx_buffer_t.
 \param suspend when true _hal.stream.read_ is changed to stream_get_null(), if false it is restored if already saved.
 \returns true if there is data in the buffer, false otherwise.
 */
-bool stream_rx_suspend (stream_rx_buffer_t *rxbuffer, bool suspend);
+ bool stream_rx_suspend (stream_rx_buffer_t *rxbuffer, bool suspend);
+
+ stream_suspend_state_t stream_is_rx_suspended (void);
 
 bool stream_mpg_register (const io_stream_t *stream, bool rx_only, stream_write_char_ptr write_char);
 
@@ -343,17 +480,17 @@ bool stream_mpg_enable (bool on);
 
 void stream_mpg_set_mode (void *data);
 
-bool stream_mpg_check_enable (char c);
+bool stream_mpg_check_enable (uint8_t c);
 
-bool stream_buffer_all (char c);
+bool stream_buffer_all (uint8_t c);
 
 bool stream_tx_blocking (void);
 
-bool stream_enqueue_realtime_command (char c);
+bool stream_enqueue_realtime_command (uint8_t c);
 
 void stream_register_streams (io_stream_details_t *details);
 
-bool stream_enumerate_streams (stream_enumerate_callback_ptr callback);
+bool stream_enumerate_streams (stream_enumerate_callback_ptr callback, void *data);
 
 bool stream_connect (const io_stream_t *stream);
 
@@ -363,14 +500,18 @@ void stream_disconnect (const io_stream_t *stream);
 
 bool stream_connected (void);
 
+void stream_set_defaults (const io_stream_t *stream, uint32_t baud_rate);
+
 const io_stream_t *stream_get_base (void);
 
 io_stream_flags_t stream_get_flags (io_stream_t stream);
 
+const io_stream_status_t *stream_get_uart_status (uint8_t instance);
+
 const io_stream_t *stream_null_init (uint32_t baud_rate);
 
 io_stream_t const *stream_open_instance (uint8_t instance, uint32_t baud_rate, stream_write_char_ptr rx_handler, const char *description);
-
+bool stream_close (io_stream_t const *stream);
 bool stream_set_description (const io_stream_t *stream, const char *description);
 
 void debug_printf(const char *fmt, ...);

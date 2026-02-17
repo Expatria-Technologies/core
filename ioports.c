@@ -3,7 +3,7 @@
 
   Part of grblHAL
 
-  Copyright (c) 2021-2025 Terje Io
+  Copyright (c) 2021-2026 Terje Io
 
   grblHAL is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -41,7 +41,7 @@ typedef enum {
     Port_DigitalOut
 } ioport_type_xxx_t;
 
-typedef struct {
+struct ioports_handle {
     ioport_type_xxx_t type;
     io_ports_detail_t *ports;
     const char *pnum;
@@ -57,7 +57,9 @@ typedef struct {
     pin_function_t max_fn;
     uint8_t map[MAX_PORTS];
     ioport_bus_t bus;
-} io_ports_private_t;
+};
+
+typedef struct ioports_handle io_ports_private_t;
 
 typedef struct {
     digital_out_ptr digital_out;                       //!< Optional handler for setting a digital output.
@@ -99,8 +101,8 @@ static io_ports_private_t ports_cfg[] = {
     }
 };
 
-PROGMEM static const char *apnum = "E0\0E1\0E2\0E3\0E4\0E5\0E6\0E7\0E8\0E9\0E10\0E11\0E12\0E13\0E14\0E15";
-PROGMEM static const char *dpnum = "P0\0P1\0P2\0P3\0P4\0P5\0P6\0P7\0P8\0P9\0P10\0P11\0P12\0P13\0P14\0P15\0P16\0P17\0P18\0P19\0P20\0P21\0P22\0P23";
+PROGMEM static const char apnum[] = "E0\0E1\0E2\0E3\0E4\0E5\0E6\0E7\0E8\0E9\0E10\0E11\0E12\0E13\0E14\0E15";
+PROGMEM static const char dpnum[] = "P0\0P1\0P2\0P3\0P4\0P5\0P6\0P7\0P8\0P9\0P10\0P11\0P12\0P13\0P14\0P15\0P16\0P17\0P18\0P19\0P20\0P21\0P22\0P23";
 
 __STATIC_FORCEINLINE io_ports_private_t *get_port_data (io_port_type_t type, io_port_direction_t dir)
 {
@@ -132,7 +134,7 @@ __STATIC_FORCEINLINE uint8_t resolve_portnum (io_ports_private_t *p_data, xbar_t
     return is_aux(p_data, port->function) ? (port->function - p_data->min_fn) : map_reverse(p_data, port->id);
 }
 
-static uint8_t ioports_count (io_port_type_t type, io_port_direction_t dir, io_ports_private_t *p_data)
+FLASHMEM static uint8_t ioports_count (io_port_type_t type, io_port_direction_t dir, io_ports_private_t *p_data)
 {
     xbar_t *port;
     uint8_t n_ports = 0, n_remapped = 0;
@@ -154,7 +156,7 @@ static uint8_t ioports_count (io_port_type_t type, io_port_direction_t dir, io_p
 \param dir as an \a #io_port_direction_t enum value.
 \returns number of ports available excluding remapped ports but including claimed ports if the API implementation supports that.
 */
-uint8_t ioports_available (io_port_type_t type, io_port_direction_t dir)
+FLASHMEM uint8_t ioports_available (io_port_type_t type, io_port_direction_t dir)
 {
     io_ports_private_t *p_data = get_port_data(type, dir);
 
@@ -169,7 +171,7 @@ uint8_t ioports_available (io_port_type_t type, io_port_direction_t dir)
 \param dir as an \a #io_port_direction_t enum value.
 \returns number of ports available.
 */
-uint8_t ioports_unclaimed (io_port_type_t type, io_port_direction_t dir)
+FLASHMEM uint8_t ioports_unclaimed (io_port_type_t type, io_port_direction_t dir)
 {
     io_ports_private_t *p_data = get_port_data(type, dir);
 
@@ -189,37 +191,56 @@ uint8_t ioports_unclaimed (io_port_type_t type, io_port_direction_t dir)
     return p_data->free;
 }
 
-static struct ff_data {
+struct ff_data {
     uint8_t port;
+    uint32_t max_port;
     const char *description;
-} ff_data;
+};
 
-static bool match_port (xbar_t *properties, uint8_t port, void *data)
+FLASHMEM static bool match_port (xbar_t *properties, uint8_t port, void *data)
 {
-    if(((struct ff_data *)data)->description && (!properties->description || strcmp(properties->description, ((struct ff_data *)data)->description)))
-        return false;
+    bool ok;
+    struct ff_data *ff_data = (struct ff_data *)data;
 
-    ((struct ff_data *)data)->port = port;
+    if((ok = properties->id <= ff_data->max_port))
+        ff_data->port = port;
 
-    return true;
+    return ok;
 }
 
-/*! \brief find first free or claimed digital or analog port.
+FLASHMEM static bool match_description (xbar_t *properties, uint8_t port, void *data)
+{
+    bool ok;
+    struct ff_data *ff_data = (struct ff_data *)data;
+
+    if((ok = properties->description && !strcmp(properties->description, ff_data->description)))
+        ff_data->port = port;
+
+    return ok;
+}
+
+/*! \brief find claimable or claimed analog or digital port. Search starts from the last port number.
 \param type as an \a #io_port_type_t enum value.
 \param dir as an \a #io_port_direction_t enum value.
-\param description pointer to a \a char constant for the pin description of a previousely claimed port or \a NULL if searching for the first free port.
+\param description pointer to a \a char constant for the pin description of a previousely claimed port
+or a port number to be used as the upper limit for the search, or \a NULL if searching for the first free port.
 \returns the port number if successful, 0xFF (255) if not.
 */
-uint8_t ioport_find_free (io_port_type_t type, io_port_direction_t dir, pin_cap_t filter, const char *description)
+FLASHMEM uint8_t ioport_find_free (io_port_type_t type, io_port_direction_t dir, pin_cap_t filter, const char *description)
 {
-    ff_data.port = IOPORT_UNASSIGNED;
-    ff_data.description = (description && *description) ? description : NULL;
+    struct ff_data ff_data = { .port = IOPORT_UNASSIGNED, .max_port = IOPORT_UNASSIGNED + 1 };
 
-    // TODO: pass modified filter with .claimable off when looking for description match?
-    if(ff_data.description && !ioports_enumerate(type, dir, (pin_cap_t){}, match_port, (void *)&ff_data)) {
-        ff_data.description = NULL;
-        ioports_enumerate(type, dir, filter, match_port, (void *)&ff_data);
+    if((ff_data.description = (description && *description) ? description : NULL)) {
+        uint_fast8_t pos = 0;
+        read_uint(ff_data.description, &pos, &ff_data.max_port);
+        if(ff_data.max_port <= IOPORT_UNASSIGNED)
+            ff_data.description = NULL;
     }
+
+    if(ff_data.description)
+        ioports_enumerate(type, dir, (pin_cap_t){ .claimable = On }, match_description, (void *)&ff_data);
+    else
+        ioports_enumerate(type, dir, filter, match_port, (void *)&ff_data);
 
     return ff_data.port;
 }
@@ -230,7 +251,7 @@ uint8_t ioport_find_free (io_port_type_t type, io_port_direction_t dir, pin_cap_
 \param port the port aux number.
 \returns pointer to \a xbar_t struct if successful, \a NULL if not.
 */
-static xbar_t *get_info (io_port_type_t type, io_port_direction_t dir, uint8_t port, bool claim)
+FLASHMEM static xbar_t *get_info (io_port_type_t type, io_port_direction_t dir, uint8_t port, bool claim)
 {
     bool ok = false;
     xbar_t *portinfo = NULL;
@@ -247,12 +268,12 @@ static xbar_t *get_info (io_port_type_t type, io_port_direction_t dir, uint8_t p
 /*! \brief Return information about a digital or analog port.
 \param type as an \a #io_port_type_t enum value.
 \param dir as an \a #io_port_direction_t enum value.
-\param port the port aux number.
+\param port the claimed port aux number.
 \returns pointer to \a xbar_t struct if successful, \a NULL if not.
 */
-xbar_t *ioport_get_info (io_port_type_t type, io_port_direction_t dir, uint8_t port)
+FLASHMEM xbar_t *ioport_get_info (io_port_type_t type, io_port_direction_t dir, uint8_t port)
 {
-    return get_info(type, dir, port, false);
+    return hal.port.get_pin_info(type, dir, port);
 }
 
 /* code to keep deprecated data updated, to be removed */
@@ -286,7 +307,7 @@ static inline void dec_hcount (io_port_type_t type, io_port_direction_t dir)
 \param description pointer to a \a char constant for the pin description.
 \returns pointer to a \a #xbar_t structure with details about the claimed port if successful, \a NULL if not.
 */
-xbar_t *ioport_claim (io_port_type_t type, io_port_direction_t dir, uint8_t *port, const char *description)
+FLASHMEM xbar_t *ioport_claim (io_port_type_t type, io_port_direction_t dir, uint8_t *port, const char *description)
 {
     xbar_t *portinfo = NULL;
 
@@ -303,42 +324,57 @@ xbar_t *ioport_claim (io_port_type_t type, io_port_direction_t dir, uint8_t *por
 
             if(get_hcount(type, dir) == hcnt)
                 dec_hcount(type, dir);
-        } else
+        } else {
             portinfo = NULL;
+            *port = IOPORT_UNASSIGNED;
+        }
     }
 
     return portinfo;
 }
 
+/*! \brief Check if a analog or digital port is available for exclusive use.
+\param type as an \a #io_port_type_t enum value.
+\param dir as an \a #io_port_direction_t enum value.
+\param port a \a uint8_t holding the ports aux number.
+\returns \a TRUE if available, \a FALSE if not.
+*/
+FLASHMEM bool ioport_claimable (io_port_type_t type, io_port_direction_t dir, uint8_t port)
+{
+    xbar_t *portinfo = port == IOPORT_UNASSIGNED ? NULL : hal.port.get_pin_info(type, dir, map_reverse(get_port_data(type, dir), port));
+
+    return port == IOPORT_UNASSIGNED || (portinfo && portinfo->cap.claimable);
+}
+
 // Deprecated
-void ioport_assign_function (aux_ctrl_t *aux_ctrl, pin_function_t *function)
+FLASHMEM void ioport_assign_function (aux_ctrl_t *aux_ctrl, pin_function_t *function)
 {
     xbar_t *input;
 
-    if((input = hal.port.get_pin_info(Port_Digital, Port_Input, aux_ctrl->aux_port))) {
+    if((input = hal.port.get_pin_info(Port_Digital, Port_Input, aux_ctrl->port))) {
 
         *function = aux_ctrl->function;
         ports_cfg[Port_DigitalIn].bus.mask &= ~(1 << input->id);
         ports_cfg[Port_DigitalIn].count = ports_cfg[Port_DigitalIn].free = -1;
-        hal.signals_cap.mask |= aux_ctrl->cap.mask;
+        hal.signals_cap.mask |= aux_ctrl->signal.mask;
 
         if(aux_ctrl->function == Input_Probe || xbar_fn_to_signals_mask(aux_ctrl->function).mask)
-            setting_remove_elements(Settings_IoPort_InvertIn, ports_cfg[Port_DigitalIn].bus.mask);
+            setting_remove_elements(Settings_IoPort_InvertIn, ports_cfg[Port_DigitalIn].bus.mask, false);
     }
 }
 
 // Deprecated
-void ioport_assign_out_function (aux_ctrl_out_t *aux_ctrl, pin_function_t *function)
+FLASHMEM void ioport_assign_out_function (aux_ctrl_out_t *aux_ctrl, pin_function_t *function)
 {
     xbar_t *output;
 
-    if((output = hal.port.get_pin_info(Port_Digital, Port_Output, aux_ctrl->aux_port))) {
+    if((output = hal.port.get_pin_info(Port_Digital, Port_Output, aux_ctrl->port))) {
 
         *function = aux_ctrl->function;
         ports_cfg[Port_DigitalOut].bus.mask &= ~(1UL << output->id);
         ports_cfg[Port_DigitalOut].count = ports_cfg[Port_DigitalOut].free = -1;
 
-        setting_remove_elements(Settings_IoPort_InvertOut, ports_cfg[Port_DigitalOut].bus.mask);
+        setting_remove_elements(Settings_IoPort_InvertOut, ports_cfg[Port_DigitalOut].bus.mask, false);
     }
 }
 
@@ -347,7 +383,7 @@ void ioport_assign_out_function (aux_ctrl_out_t *aux_ctrl, pin_function_t *funct
 \param function a \a #pin_function_t enum value.
 \param caps pointer to \a #driver_caps_t capability flags.
 */
-bool ioport_set_function (xbar_t *pin, pin_function_t function, driver_caps_t caps)
+FLASHMEM bool ioport_set_function (xbar_t *pin, pin_function_t function, driver_caps_t caps)
 {
     bool ok = false;
     io_ports_list_t *io_port = ports;
@@ -364,8 +400,8 @@ bool ioport_set_function (xbar_t *pin, pin_function_t function, driver_caps_t ca
                 case Port_DigitalIn:
                     if(caps.control)
                         hal.signals_cap.mask |= caps.control->mask;
-                    if(function == Input_Probe || xbar_fn_to_signals_mask(function).mask)
-                        setting_remove_elements(Settings_IoPort_InvertIn, cfg->bus.mask);
+                    if(function == Input_Probe || function == Input_Probe2 || function == Input_Toolsetter || xbar_fn_to_signals_mask(function).mask)
+                        setting_remove_elements(Settings_IoPort_InvertIn, cfg->bus.mask, false);
                     break;
 
                 case Port_DigitalOut:
@@ -381,7 +417,7 @@ bool ioport_set_function (xbar_t *pin, pin_function_t function, driver_caps_t ca
 
                         default: break;
                     }
-                    setting_remove_elements(Settings_IoPort_InvertOut, cfg->bus.mask);
+                    setting_remove_elements(Settings_IoPort_InvertOut, cfg->bus.mask, false);
                     break;
 
                 default: break;
@@ -395,7 +431,7 @@ bool ioport_set_function (xbar_t *pin, pin_function_t function, driver_caps_t ca
 /*! \brief Get basic ioports capabilities.
 \returns a \a #io_port_cando_t union.
 */
-io_port_cando_t ioports_can_do (void)
+FLASHMEM io_port_cando_t ioports_can_do (void)
 {
     io_port_cando_t can_do = {};
 
@@ -410,10 +446,99 @@ io_port_cando_t ioports_can_do (void)
 }
 
 // Deprecated
-bool ioport_can_claim_explicit (void)
+FLASHMEM bool ioport_can_claim_explicit (void)
 {
     return ioports_can_do().claim_explicit;
 }
+
+//
+// Some helper functions for plugins using ports
+//
+
+static float _get_value (io_port_cfg_t *p, uint8_t port)
+{
+    return port > p->port_max ? -1.0f : (float)port;
+}
+
+static status_code_t _set_value (io_port_cfg_t *p, uint8_t *port, pin_cap_t caps, float value)
+{
+    status_code_t status;
+
+    if((status = isintf(value) ? Status_OK : Status_BadNumberFormat) == Status_OK) {
+        if(value >= 0.0f) {
+
+            xbar_t *portinfo = hal.port.get_pin_info(p->handle->type >> 1, p->handle->type & 1, map_reverse(&ports_cfg[p->handle->type], (uint8_t)value));
+
+            if(portinfo == NULL || !portinfo->cap.claimable)
+                status = Status_AuxiliaryPortUnavailable;
+            else if(!(caps.mask == 0 || (portinfo->cap.mask & caps.mask)))
+                status = Status_AuxiliaryPortUnusable;
+            else
+                *port = (uint8_t)value;
+        } else
+            *port = IOPORT_UNASSIGNED;
+    }
+
+    return status;
+}
+
+uint8_t _get_next (io_port_cfg_t *p, uint8_t port, const char *description, pin_cap_t caps)
+{
+    uint8_t px = IOPORT_UNASSIGNED;
+
+    caps.claimable = On;
+
+    if(description && *description)
+        px = ioport_find_free(p->handle->type >> 1, p->handle->type & 1, (pin_cap_t){ .claimable = On }, description);
+
+    if(px == IOPORT_UNASSIGNED && !(port == 0 && port == p->port_max))
+        px = ioport_find_free(p->handle->type >> 1, p->handle->type & 1, caps, uitoa(port == IOPORT_UNASSIGNED ? p->port_max : (port > p->port_max ? p->port_max : port) - 1));
+
+    return px;
+}
+
+FLASHMEM static xbar_t *_claim (io_port_cfg_t *p, uint8_t *port, const char *description, pin_cap_t caps)
+{
+    xbar_t *portinfo = *port <= p->port_max ? hal.port.get_pin_info(p->handle->type >> 1, p->handle->type & 1, map_reverse(&ports_cfg[p->handle->type], *port)) : NULL;
+
+    if(!portinfo)
+        *port = IOPORT_UNASSIGNED;
+
+    return portinfo && !portinfo->mode.claimed && (caps.mask == 0 || (portinfo->cap.mask & caps.mask) == caps.mask) && ioport_claim(p->handle->type >> 1, p->handle->type & 1, port, description)
+            ? portinfo
+            : NULL;
+}
+
+/*! \brief Get data and pointers to helper functions for managing ports and port settings.
+\param pp a pointer to a \a io_port_cfg_t struct to hold the data and pointers.
+\param type as an \a #io_port_type_t enum value.
+\param dir as an \a #io_port_direction_t enum value.
+\returns the pointer to the \a io_port_cfg_t struct passed in the pp argument.
+*/
+FLASHMEM io_port_cfg_t *ioports_cfg (io_port_cfg_t *pp, io_port_type_t type, io_port_direction_t dir)
+{
+    static io_port_cfg_t cfg[4] = {0};
+
+    io_port_cfg_t *p = &cfg[(type << 1) | dir];
+
+    if(p->n_ports == 0 && !!hal.port.claim) {
+        if((p->n_ports = ioports_available(type, dir))) {
+            p->handle = &ports_cfg[(type << 1) | dir];
+            p->port_max = ioport_find_free(type, dir, (pin_cap_t){ .claimable = On }, NULL);
+            p->get_value = _get_value;
+            p->set_value = _set_value;
+            p->get_next = _get_next;
+            p->claim = _claim;
+            strcpy((char *)p->port_maxs, uitoa(p->port_max));
+        }
+    }
+
+    memcpy(pp, p, sizeof(io_port_cfg_t));
+
+    return pp;
+}
+
+// ---
 
 /*! \brief Enumerate ports.
 \param type as an \a #io_port_type_t enum value.
@@ -423,29 +548,30 @@ bool ioport_can_claim_explicit (void)
 If the function returns \a true the enumeration will end.
 \param data a pointer to context data passed to the callback function.
 */
-bool ioports_enumerate (io_port_type_t type, io_port_direction_t dir, pin_cap_t filter, ioports_enumerate_callback_ptr callback, void *data)
+FLASHMEM bool ioports_enumerate (io_port_type_t type, io_port_direction_t dir, pin_cap_t filter, ioports_enumerate_callback_ptr callback, void *data)
 {
     bool ok = false;
     io_ports_private_t *p_data = get_port_data(type, dir);
 
-    if(p_data->ports && p_data->n_ports && ioport_can_claim_explicit()) {
+    if(p_data->ports && p_data->n_ports && ioports_can_do().claim_explicit) {
 
        xbar_t *portinfo;
        uint_fast16_t n_ports;
+       io_ports_private_t *p_data = get_port_data(type, dir);
 
        if(filter.mask) {
 
-           uint_fast16_t n_ports = p_data->n_ports;
+           n_ports = p_data->n_ports;
 
            do {
-                if((portinfo = hal.port.get_pin_info(type, dir, --n_ports)) && (portinfo->cap.mask & filter.mask) == filter.mask) {
+                if((portinfo = hal.port.get_pin_info(type, dir, map_reverse(p_data, --n_ports))) && (portinfo->cap.mask & filter.mask) == filter.mask) {
                     if((ok = callback(portinfo, resolve_portnum(p_data, portinfo), data)))
                         break;
                 }
             } while(n_ports);
 
        } else for(n_ports = 0; n_ports < p_data->n_ports; n_ports++) {
-           if((portinfo = hal.port.get_pin_info(type, dir, n_ports))) {
+           if((portinfo = hal.port.get_pin_info(type, dir, map_reverse(p_data, n_ports)))) {
                if((ok = callback(portinfo, resolve_portnum(p_data, portinfo), data)))
                    break;
            }
@@ -461,7 +587,7 @@ bool ioports_enumerate (io_port_type_t type, io_port_direction_t dir, pin_cap_t 
 \param port the port aux number.
 \param description pointer to a \a char constant for the pin description.
 */
-bool ioport_set_description (io_port_type_t type, io_port_direction_t dir, uint8_t port, const char *description)
+FLASHMEM bool ioport_set_description (io_port_type_t type, io_port_direction_t dir, uint8_t port, const char *description)
 {
     if(hal.port.set_pin_description)
         hal.port.set_pin_description(type, dir, port, description);
@@ -487,7 +613,7 @@ int32_t ioport_wait_on_input (io_port_type_t type, uint8_t port, wait_mode_t wai
     return hal.port.wait_on_input ? hal.port.wait_on_input(type, port, wait_mode, timeout) : -1;
 }
 
-bool ioport_analog_out_config (uint8_t port, pwm_config_t *config)
+FLASHMEM bool ioport_analog_out_config (uint8_t port, pwm_config_t *config)
 {
     xbar_t *pin;
     bool ok = (pin = hal.port.get_pin_info(Port_Analog, Port_Output, port)) && pin->config;
@@ -495,7 +621,7 @@ bool ioport_analog_out_config (uint8_t port, pwm_config_t *config)
     return ok && pin->config(pin, config, false);
 }
 
-bool ioport_digital_in_config (uint8_t port, gpio_in_config_t *config)
+FLASHMEM bool ioport_digital_in_config (uint8_t port, gpio_in_config_t *config)
 {
     xbar_t *pin;
     bool ok = (pin = hal.port.get_pin_info(Port_Digital, Port_Input, port)) && pin->config;
@@ -503,12 +629,12 @@ bool ioport_digital_in_config (uint8_t port, gpio_in_config_t *config)
     return ok && pin->config(pin, config, false);
 }
 
-bool ioport_enable_irq (uint8_t port, pin_irq_mode_t irq_mode, ioport_interrupt_callback_ptr handler)
+FLASHMEM bool ioport_enable_irq (uint8_t port, pin_irq_mode_t irq_mode, ioport_interrupt_callback_ptr handler)
 {
     return hal.port.register_interrupt_handler && hal.port.register_interrupt_handler(port, irq_mode, handler);
 }
 
-bool ioport_digital_out_config (uint8_t port, gpio_out_config_t *config)
+FLASHMEM bool ioport_digital_out_config (uint8_t port, gpio_out_config_t *config)
 {
     xbar_t *pin;
     bool ok = (pin = hal.port.get_pin_info(Port_Digital, Port_Output, port)) && pin->config && !(pin->mode.pwm || pin->mode.servo_pwm);
@@ -516,7 +642,7 @@ bool ioport_digital_out_config (uint8_t port, gpio_out_config_t *config)
     return ok && pin->config(pin, config, false);
 }
 
-bool ioport_digital_pwm_config (uint8_t port, pwm_config_t *config)
+FLASHMEM bool ioport_digital_pwm_config (uint8_t port, pwm_config_t *config)
 {
     xbar_t *pin;
     bool ok = (pin = hal.port.get_pin_info(Port_Digital, Port_Output, port)) && pin->config && pin->mode.claimed && pin->cap.pwm;
@@ -536,7 +662,7 @@ __STATIC_FORCEINLINE const char *pnum_to_string (uint8_t port, const char *pnum)
     return pnum ? (pnum + (port * 3) + (port > 9 ? port - 10 : 0)) : NULL;
 }
 
-static xbar_t *io_get_pin_info (io_port_type_t type, io_port_direction_t dir, uint8_t port)
+FLASHMEM static xbar_t *io_get_pin_info (io_port_type_t type, io_port_direction_t dir, uint8_t port)
 {
     xbar_t *pin = NULL;
     io_ports_list_t *io_port = ports;
@@ -548,6 +674,7 @@ static xbar_t *io_get_pin_info (io_port_type_t type, io_port_direction_t dir, ui
         if(is_match(io_port, type, dir, port)) {
             if((pin = io_port->hal.get_pin_info(dir, port - io_port->ports_id->cfg[dir].n_start))) {
                 pin->ports_id = io_port->ports_id;
+                pin->cap.claimable = is_aux(cfg, pin->function);
                 pin->mode.claimed = cfg->claimed.mask & (1UL << (pin->id + io_port->ports_id->cfg[dir].n_start));
             }
         }
@@ -556,7 +683,7 @@ static xbar_t *io_get_pin_info (io_port_type_t type, io_port_direction_t dir, ui
     return pin;
 }
 
-static void io_set_pin_description (io_port_type_t type, io_port_direction_t dir, uint8_t port, const char *s)
+FLASHMEM static void io_set_pin_description (io_port_type_t type, io_port_direction_t dir, uint8_t port, const char *s)
 {
     io_ports_list_t *io_port = ports;
     io_ports_private_t *cfg = get_port_data(type, dir);
@@ -571,7 +698,7 @@ static void io_set_pin_description (io_port_type_t type, io_port_direction_t dir
     } while((io_port = io_port->next));
 }
 
-static bool io_claim (io_port_type_t type, io_port_direction_t dir, uint8_t *port, const char *description)
+FLASHMEM static bool io_claim (io_port_type_t type, io_port_direction_t dir, uint8_t *port, const char *description)
 {
     bool ok = false;
     io_ports_list_t *io_port = ports;
@@ -616,11 +743,15 @@ static bool io_analog_out (uint8_t port, float value)
     io_ports_list_t *io_port = ports;
     io_ports_private_t *cfg = get_port_data(Port_Analog, Port_Output);
 
-    port = cfg->map[port];
+    uint8_t pn = cfg->map[port];
 
     do {
-        if(io_port->hal.analog_out && is_match(io_port, Port_Analog, Port_Output, port))
-            return io_port->hal.analog_out(port - io_port->ports_id->cfg[Port_Output].n_start, value);
+        if(io_port->hal.analog_out && is_match(io_port, Port_Analog, Port_Output, pn)) {
+            bool ok = io_port->hal.analog_out(pn - io_port->ports_id->cfg[Port_Output].n_start, value);
+            if(ok && grbl.on_port_out && !(cfg->claimed.mask & (1 << pn)))
+                grbl.on_port_out(port, Port_Analog, value);
+            return ok;
+        }
     } while((io_port = io_port->next));
 
     return false;
@@ -631,11 +762,13 @@ static void io_digital_out (uint8_t port, bool on)
     io_ports_list_t *io_port = ports;
     io_ports_private_t *cfg = get_port_data(Port_Digital, Port_Output);
 
-    port = cfg->map[port];
+    uint8_t pn = cfg->map[port];
 
     do {
-        if(io_port->hal.digital_out && is_match(io_port, Port_Digital, Port_Output, port)) {
-            io_port->hal.digital_out(port - io_port->ports_id->cfg[Port_Output].n_start, on);
+        if(io_port->hal.digital_out && is_match(io_port, Port_Digital, Port_Output, pn)) {
+            io_port->hal.digital_out(pn - io_port->ports_id->cfg[Port_Output].n_start, on);
+            if(grbl.on_port_out && !(cfg->claimed.mask & (1 << pn)))
+                grbl.on_port_out(port, Port_Digital, (float)on);
             break;
         }
     } while((io_port = io_port->next));
@@ -660,7 +793,7 @@ static int32_t io_wait_on_input (io_port_type_t type, uint8_t port, wait_mode_t 
     return value;
 }
 
-static bool io_register_interrupt_handler (uint8_t port, pin_irq_mode_t irq_mode, ioport_interrupt_callback_ptr interrupt_callback)
+FLASHMEM static bool io_register_interrupt_handler (uint8_t port, pin_irq_mode_t irq_mode, ioport_interrupt_callback_ptr interrupt_callback)
 {
     uint8_t user_port = port;
     io_ports_list_t *io_port = ports;
@@ -678,7 +811,7 @@ static bool io_register_interrupt_handler (uint8_t port, pin_irq_mode_t irq_mode
 
 /**/
 
-static io_ports_list_t *insert_ports (void)
+FLASHMEM static io_ports_list_t *insert_ports (void)
 {
     io_ports_list_t *io_ports;
 
@@ -699,7 +832,7 @@ static io_ports_list_t *insert_ports (void)
     return io_ports;
 }
 
-static bool claim_hal (void)
+FLASHMEM static bool claim_hal (void)
 {
     io_port_t empty = {};
 
@@ -733,14 +866,14 @@ ISR_CODE uint8_t ISR_FUNC(ioports_map_reverse)(io_ports_detail_t *type, uint8_t 
     return port;
 }
 
-static const char *get_pnum (io_ports_data_t *ports, uint8_t port)
+FLASHMEM static const char *get_pnum (io_ports_data_t *ports, uint8_t port)
 {
     return ports->pnum ? (ports->pnum + (port * 3) + (port > 9 ? port - 10 : 0)) : NULL;
 }
 
 #endif
 
-static uint8_t add_ports (io_ports_detail_t *ports, uint8_t *map, io_port_type_t type, io_port_direction_t dir, uint8_t n_ports)
+FLASHMEM static uint8_t add_ports (io_ports_detail_t *ports, uint8_t *map, io_port_type_t type, io_port_direction_t dir, uint8_t n_ports)
 {
     io_ports_private_t *p_data = get_port_data(type, dir);
 
@@ -758,8 +891,10 @@ static uint8_t add_ports (io_ports_detail_t *ports, uint8_t *map, io_port_type_t
         if(p_data->ports == NULL)
             p_data->ports = ports;
         p_data->count = -1;
-    } else
+    } else {
         ports->n_start = 255;
+        ports->idx_last = 0;
+    }
 
     p_data->n_ports += n_ports;
     ports->n_ports = n_ports;
@@ -767,7 +902,7 @@ static uint8_t add_ports (io_ports_detail_t *ports, uint8_t *map, io_port_type_t
     return n_ports;
 }
 
-static bool _ioports_add (io_ports_data_t *ports, io_port_type_t type, uint8_t n_in, uint8_t n_out, set_pin_description_ptr set_description)
+FLASHMEM static bool _ioports_add (io_ports_data_t *ports, io_port_type_t type, uint8_t n_in, uint8_t n_out, set_pin_description_ptr set_description)
 {
     uint_fast8_t n_ports;
     io_ports_private_t *cfg_in = get_port_data(type, Port_Input),
@@ -847,19 +982,46 @@ static bool _ioports_add (io_ports_data_t *ports, io_port_type_t type, uint8_t n
     return n_ports > 0;
 }
 
-bool ioports_add (io_ports_data_t *ports, io_port_type_t type, uint8_t n_in, uint8_t n_out)
+/*! \brief Remap (virtual) port.
+\param type as an \a #io_port_type_t enum value.
+\param dir as an \a #io_port_direction_t enum value.
+\param port_from the assigned port number.
+\param port_to the remapped port number. The original port number will be swapped with \a port_from.
+\returns \a true if successful, \a false if original port is already claimed.
+*/
+FLASHMEM bool ioport_remap (io_port_type_t type, io_port_direction_t dir, uint8_t port_from, uint8_t port_to)
+{
+    uint8_t org_port;
+    bool ok;
+    io_ports_private_t *cfg = get_port_data(type, dir);
+ 
+    if((ok = (cfg->claimed.mask & (1UL << cfg->map[port_to])) == 0)) {
+
+        if((org_port = map_reverse(cfg, port_from)) != port_to) {
+            cfg->map[org_port] = cfg->map[port_to];
+            hal.port.set_pin_description(type, dir, org_port, pnum_to_string(org_port, cfg->pnum));
+        }
+
+        cfg->free = -1;
+        cfg->map[port_to] = port_from;
+    }
+
+    return ok;
+}
+
+FLASHMEM bool ioports_add (io_ports_data_t *ports, io_port_type_t type, uint8_t n_in, uint8_t n_out)
 {
     return hal.port.get_pin_info != io_get_pin_info && _ioports_add(ports, type, n_in, n_out, hal.port.set_pin_description);
 }
 
 static ll_set_pin_description_ptr set_descr_veneer;
 
-static void set_description (io_port_type_t type, io_port_direction_t dir, uint8_t port, const char *s)
+FLASHMEM static void set_description (io_port_type_t type, io_port_direction_t dir, uint8_t port, const char *s)
 {
     set_descr_veneer(dir, port, s);
 }
 
-bool ioports_add_analog (io_analog_t *analog)
+FLASHMEM bool ioports_add_analog (io_analog_t *analog)
 {
     if(analog->ports->in.n_ports + analog->ports->out.n_ports == 0)
         return false;
@@ -888,7 +1050,7 @@ bool ioports_add_analog (io_analog_t *analog)
     return ok;
 }
 
-bool ioports_add_digital (io_digital_t *digital)
+FLASHMEM bool ioports_add_digital (io_digital_t *digital)
 {
     if(digital->ports->in.n_ports + digital->ports->out.n_ports == 0)
         return false;
@@ -937,7 +1099,7 @@ __STATIC_FORCEINLINE uint_fast16_t invert_pwm (ioports_pwm_t *pwm_data, uint_fas
 \param clock_hz timer clock frequency used for PWM generation.
 \returns \a true if successful, \a false if no PWM range possible - driver should then revert to simple on/off control.
 */
-bool ioports_precompute_pwm_values (pwm_config_t *config, ioports_pwm_t *pwm_data, uint32_t clock_hz)
+FLASHMEM bool ioports_precompute_pwm_values (pwm_config_t *config, ioports_pwm_t *pwm_data, uint32_t clock_hz)
 {
     pwm_data->f_clock = clock_hz;
 
@@ -986,7 +1148,7 @@ uint_fast16_t ioports_compute_pwm_value (ioports_pwm_t *pwm_data, float value)
     return pwm_value;
 }
 
-void ioport_save_input_settings (xbar_t *xbar, gpio_in_config_t *config)
+FLASHMEM void ioport_save_input_settings (xbar_t *xbar, gpio_in_config_t *config)
 {
     io_ports_list_t *io_port = ports;
     io_ports_private_t *cfg = get_port_data(!xbar->mode.analog, xbar->mode.output);
@@ -1028,7 +1190,7 @@ void ioport_save_input_settings (xbar_t *xbar, gpio_in_config_t *config)
     settings_write_global();
 }
 
-void ioport_save_output_settings (xbar_t *xbar, gpio_out_config_t *config)
+FLASHMEM void ioport_save_output_settings (xbar_t *xbar, gpio_out_config_t *config)
 {
     io_ports_list_t *io_port = ports;
     io_ports_private_t *cfg = get_port_data(!xbar->mode.analog, xbar->mode.output);
@@ -1057,7 +1219,7 @@ void ioport_save_output_settings (xbar_t *xbar, gpio_out_config_t *config)
     settings_write_global();
 }
 
-static bool is_setting_available (const setting_detail_t *setting, uint_fast16_t offset)
+FLASHMEM static bool is_setting_available (const setting_detail_t *setting, uint_fast16_t offset)
 {
     bool available = false;
 
@@ -1080,7 +1242,7 @@ static bool is_setting_available (const setting_detail_t *setting, uint_fast16_t
     return available;
 }
 
-static status_code_t aux_set_value (setting_id_t id, uint_fast16_t value)
+FLASHMEM static status_code_t aux_set_value (setting_id_t id, uint_fast16_t value)
 {
     xbar_t *xbar;
     uint8_t port = 0;
@@ -1200,7 +1362,7 @@ static status_code_t aux_set_value (setting_id_t id, uint_fast16_t value)
     return Status_OK;
 }
 
-static uint32_t aux_get_value (setting_id_t id)
+FLASHMEM static uint32_t aux_get_value (setting_id_t id)
 {
     uint32_t value = 0;
 
@@ -1229,11 +1391,11 @@ static uint32_t aux_get_value (setting_id_t id)
     return value;
 }
 
-static const setting_group_detail_t ioport_groups[] = {
+PROGMEM static const setting_group_detail_t ioport_groups[] = {
     { Group_Root, Group_AuxPorts, "Aux ports"}
 };
 
-static const setting_detail_t ioport_settings[] = {
+PROGMEM static const setting_detail_t ioport_settings[] = {
     { Settings_IoPort_InvertIn, Group_AuxPorts, "Invert I/O Port inputs", NULL, Format_Bitfield, ports_cfg[Port_DigitalIn].port_names, NULL, NULL, Setting_NonCoreFn, aux_set_value, aux_get_value, is_setting_available },
 #ifdef AUX_SETTINGS_PULLUP
     { Settings_IoPort_Pullup_Disable, Group_AuxPorts, "I/O Port inputs pullup disable", NULL, Format_Bitfield, digital.in.port_names, NULL, NULL, Setting_NonCoreFn, aux_set_value, aux_get_value, is_setting_available },
@@ -1242,18 +1404,46 @@ static const setting_detail_t ioport_settings[] = {
 //    { Settings_IoPort_OD_Enable, Group_AuxPorts, "I/O Port outputs as open drain", NULL, Format_Bitfield, digital.out.port_names, NULL, NULL, Setting_NonCoreFn, aux_set_value, aux_get_value, is_setting_available }
 };
 
-#ifndef NO_SETTINGS_DESCRIPTIONS
-
-static const setting_descr_t ioport_settings_descr[] = {
+PROGMEM static const setting_descr_t ioport_settings_descr[] = {
     { Settings_IoPort_InvertIn, "Invert IOPort inputs." },
 //    { Settings_IoPort_Pullup_Disable, "Disable IOPort input pullups." },
     { Settings_IoPort_InvertOut, "Invert IOPort output." },
 //    { Settings_IoPort_OD_Enable, "Set IOPort outputs as open drain (OD)." }
 };
 
-#endif
+FLASHMEM static bool config_probe_pins (pin_function_t function, gpio_in_config_t *config)
+{
+    bool ok = true;
 
-void ioport_setting_changed (setting_id_t id)
+    switch(function) {
+
+        case Input_Probe:
+            config->debounce  = Off;
+            config->inverted  = settings.probe.invert_probe_pin;
+            config->pull_mode = settings.probe.disable_probe_pullup ? PullMode_None : PullMode_Up;
+            break;
+
+        case Input_Probe2:
+            config->debounce  = Off;
+            config->inverted  = settings.probe.invert_probe2_input;
+            config->pull_mode = settings.probe.disable_probe_pullup ? PullMode_None : PullMode_Up;
+            break;
+
+        case Input_Toolsetter:
+            config->debounce  = Off;
+            config->inverted  = settings.probe.invert_toolsetter_input;
+            config->pull_mode = settings.probe.disable_toolsetter_pullup ? PullMode_None : PullMode_Up;
+            break;
+
+        default:
+            ok = false;
+            break;
+    }
+
+    return ok;
+}
+
+FLASHMEM void ioport_setting_changed (setting_id_t id)
 {
     if(on_setting_changed)
         on_setting_changed(id);
@@ -1269,29 +1459,11 @@ void ioport_setting_changed (setting_id_t id)
 
                 do {
                     if((xbar = hal.port.get_pin_info(Port_Digital, Port_Input, map_reverse(&ports_cfg[Port_DigitalIn], --port)))) {
-                        if(xbar->config && xbar->function == Input_Probe) {
-
-                            in_config.debounce  = Off;
-                            in_config.inverted  = settings.probe.invert_probe_pin;
-                            in_config.pull_mode = settings.probe.disable_probe_pullup ? PullMode_None : PullMode_Up;
-
+                        if(xbar->config && config_probe_pins(xbar->function, &in_config)) {
                             if(in_config.inverted)
                                 settings.ioport.invert_in.mask |= (1 << port);
                             else
                                 settings.ioport.invert_in.mask &= ~(1 << port);
-
-                            xbar->config(xbar, &in_config, false);
-                        } else if(xbar->config && xbar->function == Input_Toolsetter) {
-
-                            in_config.debounce  = Off;
-                            in_config.inverted  = settings.probe.invert_toolsetter_input;
-                            in_config.pull_mode = settings.probe.disable_toolsetter_pullup ? PullMode_None : PullMode_Up;
-
-                            if(in_config.inverted)
-                                settings.ioport.invert_in.mask |= (1 << port);
-                            else
-                                settings.ioport.invert_in.mask &= ~(1 << port);
-
                             xbar->config(xbar, &in_config, false);
                         }
                     }
@@ -1312,12 +1484,13 @@ void ioport_setting_changed (setting_id_t id)
                         if(xbar->config && xbar->function < Input_Probe) {
 
                             in_config.debounce = xbar->mode.debounce;
-                            in_config.inverted = !!(settings.ioport.invert_in.mask & (1 << port));
-                            in_config.pull_mode = (pull_mode_t)xbar->mode.pull_mode;
 
                             if((ctrl = xbar_fn_to_signals_mask(xbar->function)).mask) {
                                 in_config.inverted = !!(settings.control_invert.mask & ctrl.mask);
                                 in_config.pull_mode = (settings.control_disable_pullup.mask & ctrl.mask) ? PullMode_None : PullMode_Up;
+                            } else {
+                                in_config.inverted = !!(settings.ioport.invert_in.mask & (1 << port));
+                                in_config.pull_mode = (pull_mode_t)xbar->mode.pull_mode;
                             }
 
                             if(in_config.inverted)
@@ -1337,7 +1510,7 @@ void ioport_setting_changed (setting_id_t id)
     }
 }
 
-static void ioports_configure (settings_t *settings)
+FLASHMEM static void ioports_configure (settings_t *settings)
 {
     uint8_t port;
     xbar_t *xbar;
@@ -1366,12 +1539,12 @@ static void ioports_configure (settings_t *settings)
 #endif
             } else { // For probe and control signals higher level config takes priority
                 in_config.inverted = Off;
-                if(xbar->function == Input_Probe)
-                    in_config.pull_mode = settings->probe.disable_probe_pullup ? PullMode_None : PullMode_Up;
-                else if(xbar->function < Input_Probe) {
+                if(!config_probe_pins(xbar->function, &in_config) && xbar->function < Input_Probe) {
                     control_signals_t ctrl;
-                    if((ctrl = xbar_fn_to_signals_mask(xbar->function)).mask)
+                    if((ctrl = xbar_fn_to_signals_mask(xbar->function)).mask) {
+                        in_config.inverted = !!(settings->control_invert.mask & ctrl.mask);
                         in_config.pull_mode = (settings->control_disable_pullup.mask & ctrl.mask) ? PullMode_None : PullMode_Up;
+                    }
                 }
             }
             xbar->config(xbar, &in_config, false);
@@ -1386,11 +1559,8 @@ static void ioports_configure (settings_t *settings)
                 out_config.inverted = (settings->ioport.invert_out.mask & (1 << port)) && is_aux(cfg, xbar->function);
                 out_config.open_drain = !!(settings->ioport.od_enable_out.mask & (1 << port));
                 xbar->config(xbar, &out_config, false);
-            } else { // TODO: same for inputs?
-                ioport_bus_t bus;
-                bus.mask = cfg->bus.mask & (1 << port);
-                setting_remove_elements(Settings_IoPort_InvertOut, bus.mask);
-            }
+            } else // TODO: same for inputs?
+                setting_remove_elements(Settings_IoPort_InvertOut, cfg->bus.mask & ~(1 << port), false);
         }
     } while(port);
 
@@ -1398,7 +1568,7 @@ static void ioports_configure (settings_t *settings)
         on_settings_loaded();
 }
 
-static void onSettingsChanged (settings_t *settings, settings_changed_flags_t changed)
+FLASHMEM static void onSettingsChanged (settings_t *settings, settings_changed_flags_t changed)
 {
     if(on_settings_changed)
         on_settings_changed(settings, changed);
@@ -1407,7 +1577,7 @@ static void onSettingsChanged (settings_t *settings, settings_changed_flags_t ch
         ioports_configure(settings);
 }
 
-void ioports_add_settings (driver_settings_load_ptr settings_loaded, setting_changed_ptr setting_changed)
+FLASHMEM void ioports_add_settings (driver_settings_load_ptr settings_loaded, setting_changed_ptr setting_changed)
 {
     static bool ok = false;
     static setting_details_t setting_details = {
@@ -1416,10 +1586,8 @@ void ioports_add_settings (driver_settings_load_ptr settings_loaded, setting_cha
         .n_groups = sizeof(ioport_groups) / sizeof(setting_group_detail_t),
         .settings = ioport_settings,
         .n_settings = sizeof(ioport_settings) / sizeof(setting_detail_t),
-    #ifndef NO_SETTINGS_DESCRIPTIONS
         .descriptions = ioport_settings_descr,
         .n_descriptions = sizeof(ioport_settings_descr) / sizeof(setting_descr_t),
-    #endif
         .save = settings_write_global
     };
 
