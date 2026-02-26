@@ -3877,8 +3877,8 @@ status_code_t gc_execute_block (char *block)
                 protocol_execute_realtime();                    // Execute...
             }
 #if NGC_EXPRESSIONS_ENABLE
-            if((status_code_t)int_value == Status_Unhandled) &&
-                 grbl.tool_table.n_tools && command_words.G8 && gc_block.modal.tool_offset_mode == ToolLengthOffset_Enable) {
+            if(((status_code_t)int_value == Status_Unhandled) &&
+              grbl.tool_table.n_tools && command_words.G8 && gc_block.modal.tool_offset_mode == ToolLengthOffset_Enable) {
                 gc_state.g43_pending = gc_block.words.h ? (tool_id_t)gc_block.values.h : pending_tool->tool_id;
                 command_words.G8 = gc_block.words.h = Off;
             }
