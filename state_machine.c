@@ -30,6 +30,8 @@
 #include "state_machine.h"
 #include "override.h"
 
+extern void gc_tool_changed (void);
+
 static void state_idle (uint_fast16_t new_state);
 static void state_cycle (uint_fast16_t rt_exec);
 static void state_await_hold (uint_fast16_t rt_exec);
@@ -456,16 +458,13 @@ static void state_cycle (uint_fast16_t rt_exec)
  */
 FLASHMEM static void state_await_toolchanged (uint_fast16_t rt_exec)
 {
-    if (rt_exec & EXEC_CYCLE_START) {
-        if (!gc_state.tool_change) {
+    if(rt_exec & EXEC_CYCLE_START) {
+        if(!gc_state.tool_change) {
 
-            if (hal.stream.suspend_read)
+            if(hal.stream.suspend_read)
                 hal.stream.suspend_read(false); // Tool change complete, restore "normal" stream input.
 
-            if(grbl.on_tool_changed)
-                grbl.on_tool_changed(gc_state.tool);
-
-            report_add_realtime(Report_Tool);
+            gc_tool_changed();
         }
         pending_state = gc_state.tool_change ? STATE_TOOL_CHANGE : STATE_IDLE;
         state_set(STATE_IDLE);

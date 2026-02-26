@@ -252,6 +252,9 @@ FLASHMEM bool plan_reset (void)
 
     memset(&pl, 0, sizeof(planner_t)); // Clear planner struct
 
+    pl.override.feed_rate = sys.override.feed_rate;
+    pl.override.rapid_rate = sys.override.rapid_rate;
+
     plan_reset_buffer(&block_buffer, block_buffer.blocks[0].next == NULL);
 
     return true;
@@ -313,12 +316,12 @@ float plan_compute_profile_nominal_speed (plan_block_t *block)
                            : block->programmed_rate;
 
     if(block->condition.rapid_motion)
-        nominal_speed *= (0.01f * (float)sys.override.rapid_rate);
+        nominal_speed *= (0.01f * (float)pl.override.rapid_rate);
     else {
-        if(sys.override.feed_rate != 100 && !block->condition.no_feed_override) {
+        if(pl.override.feed_rate != 100 && !block->condition.no_feed_override) {
             if(nominal_speed > block->rapid_rate)
                 nominal_speed = block->rapid_rate;
-            nominal_speed *= (0.01f * (float)sys.override.feed_rate);
+            nominal_speed *= (0.01f * (float)pl.override.feed_rate);
         }
         if(nominal_speed > block->rapid_rate)
             nominal_speed = block->rapid_rate;
@@ -741,13 +744,29 @@ void plan_sync_velocity (void *block)
 }
 
 // Set feed overrides
+FLASHMEM static void _plan_feed_override (override_t feed_rate, override_t rapid_rate)
+{
+    bool feedrate_changed, rapidrate_changed = false;
+
+    if(((feedrate_changed = feed_rate != pl.override.feed_rate) || (rapidrate_changed = rapid_rate != pl.override.rapid_rate))) {
+
+        pl.override.feed_rate = feed_rate;
+        pl.override.rapid_rate = rapid_rate;
+
+        if(plan_update_velocity_profile_parameters())
+            plan_cycle_reinitialize();
+
+        if(grbl.on_override_changed) {
+            if(feedrate_changed)
+                grbl.on_override_changed(OverrideChanged_FeedRate);
+            if(rapidrate_changed)
+                grbl.on_override_changed(OverrideChanged_RapidRate);
+        }
+    }
+}
+
 FLASHMEM void plan_feed_override (override_t feed_override, override_t rapid_override)
 {
-    bool feedrate_changed = false, rapidrate_changed = false;
-
-    if(sys.override.control.feed_rates_disable)
-        return;
-
     if(feed_override == 0)
         feed_override = sys.override.feed_rate;
     else
@@ -758,20 +777,18 @@ FLASHMEM void plan_feed_override (override_t feed_override, override_t rapid_ove
     else
         rapid_override = constrain(rapid_override, 5, 100);
 
-    if((feedrate_changed = feed_override != sys.override.feed_rate) ||
-         (rapidrate_changed = rapid_override != sys.override.rapid_rate)) {
+    if(feed_override != sys.override.feed_rate || rapid_override != sys.override.rapid_rate) {
+
         sys.override.feed_rate = feed_override;
         sys.override.rapid_rate = rapid_override;
+
         report_add_realtime(Report_Overrides); // Set to report change immediately
-        if(plan_update_velocity_profile_parameters())
-            plan_cycle_reinitialize();
-        if(grbl.on_override_changed) {
-            if(feedrate_changed)
-                grbl.on_override_changed(OverrideChanged_FeedRate);
-            if(rapidrate_changed)
-                grbl.on_override_changed(OverrideChanged_RapidRate);
-        }
     }
+
+    if(sys.override.control.feed_rates_disable)
+        _plan_feed_override(DEFAULT_FEED_OVERRIDE, DEFAULT_RAPID_OVERRIDE);
+    else
+        _plan_feed_override(sys.override.feed_rate, sys.override.rapid_rate);
 }
 
 FLASHMEM void plan_data_init (plan_line_data_t *plan_data)
@@ -779,6 +796,7 @@ FLASHMEM void plan_data_init (plan_line_data_t *plan_data)
     memset(plan_data, 0, sizeof(plan_line_data_t));
     plan_data->offset_id = gc_state.offset_id;
     plan_data->spindle.hal = gc_spindle_get(-1)->hal;
+    plan_data->condition.no_feed_override = sys.override.control.feed_rates_disable;
     plan_data->condition.target_validated = plan_data->condition.target_valid = sys.soft_limits.mask == 0;
 #ifdef KINEMATICS_API
     plan_data->rate_multiplier = 1.0f;

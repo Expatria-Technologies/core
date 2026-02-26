@@ -453,32 +453,6 @@ typedef struct {
     atc_get_state_ptr atc_get_state; //!< Optional handler for checking ATC status.
 } tool_ptrs_t;
 
-/*******************
- *  Encoder input  *
- *******************/
-
-/*! \brief Pointer to function for getting number of encoders supported.
-\returns number of encoders.
-*/
-typedef uint8_t (*encoder_get_n_encoders_ptr)(void);
-
-/*! \brief Pointer to callback function to receive encoder events.
-\param encoder pointer to a \a encoder_t struct.
-\param position encoder position.
-*/
-typedef void (*encoder_on_event_ptr)(encoder_t *encoder, int32_t position);
-
-/*! \brief Pointer to function for resetting encoder data.
-\param id encoder id.
-*/
-typedef void (*encoder_reset_ptr)(uint_fast8_t id);
-
-typedef struct {
-    encoder_get_n_encoders_ptr get_n_encoders;  //!< Optional handler for getting number of encoders supported.
-    encoder_on_event_ptr on_event;              //!< Optional callback handler for receiving encoder events.
-    encoder_reset_ptr reset;                    //!< Optional handler for resetting data for an encoder.
-} encoder_ptrs_t;
-
 /*! \brief Pointer to callback function to receive spindle encoder index events.
 \param count index pulse count.
 */
@@ -513,7 +487,7 @@ typedef union {
                 comp1    :1, //!< Timer supports compare interrupt 0
                 comp2    :1, //!< Timer supports compare interrupt 1
                 ext_clk  :1, //!< External clock supported
-                encoder  :1, //!< Emcode mode supported
+                encoder  :1, //!< Encode mode supported
                 unused   :2;
     };
 } timer_cap_t;
@@ -691,7 +665,6 @@ typedef struct {
     pallet_shuttle_ptr pallet_shuttle;      //!< Optional handler for performing a pallet shuttle on program end (M60).
     void (*reboot)(void);                   //!< Optoional handler for rebooting the controller. This will be called when #ASCII_ESC followed by #CMD_REBOOT is received.
 
-    encoder_ptrs_t encoder;                 //!< Optional handlers for encoder support.
     spindle_encoder_on_index_ptr spindle_encoder_on_index;  //!< Optional handler (callback) to receive spindle encoder index event.
 
     /*! \brief Optional handler for getting the current axis positions.

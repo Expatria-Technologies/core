@@ -7,7 +7,7 @@
 
   Part of grblHAL
 
-  Copyright (c) 2020-2025 Terje Io
+  Copyright (c) 2020-2026 Terje Io
 
   grblHAL is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -154,25 +154,7 @@ typedef struct {
     uint8_t id;
 } modbus_tcp_settings_t;
 
-// Quadrature encoder interface
-
-typedef enum {
-    Encoder_Universal = 0,
-    Encoder_FeedRate,
-    Encoder_RapidRate,
-    Encoder_Spindle_RPM,
-    Encoder_MPG,
-    Encoder_MPG_X,
-    Encoder_MPG_Y,
-    Encoder_MPG_Z,
-    Encoder_MPG_A,
-    Encoder_MPG_B,
-    Encoder_MPG_C,
-    Encoder_MPG_U,
-    Encoder_MPG_V,
-    Encoder_MPG_W,
-    Encoder_Spindle_Position
-} encoder_mode_t;
+// Encoder settings offsets
 
 typedef enum {
     Setting_EncoderMode = 0,
@@ -180,45 +162,6 @@ typedef enum {
     Setting_EncoderCPD = 2,     //!< Count Per Detent.
     Setting_EncoderDblClickWindow = 3 // ms
 } encoder_setting_id_t;
-
-typedef union {
-    uint8_t events;
-    struct {
-        uint8_t position_changed  :1,
-                direction_changed :1,
-                click             :1,
-                dbl_click         :1,
-                long_click        :1,
-                index_pulse       :1,
-                unused            :2;
-    };
-} encoder_event_t;
-
-typedef union {
-    uint8_t flags;
-    uint8_t value;
-    struct {
-        uint8_t single_count_per_detent :1;
-    };
-} encoder_flags_t;
-
-typedef struct {
-    encoder_mode_t mode;
-    uint32_t cpr;               //!< Count per revolution.
-    uint32_t cpd;               //!< Count per detent.
-    uint32_t dbl_click_window;  //!< ms.
-    encoder_flags_t flags;
-} encoder_settings_t;
-
-typedef struct {
-    encoder_mode_t mode;
-    uint_fast8_t id;
-    uint_fast8_t axis;          //!< Axis index for MPG encoders, 0xFF for others.
-    int32_t position;
-    uint32_t velocity;
-    encoder_event_t event;
-    encoder_settings_t *settings;
-} encoder_t;
 
 // DISPLAYS:
 

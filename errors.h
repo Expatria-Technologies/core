@@ -3,7 +3,7 @@
 
   Part of grblHAL
 
-  Copyright (c) 2017-2025 Terje Io
+  Copyright (c) 2017-2026 Terje Io
   Copyright (c) 2011-2016 Sungeun K. Jeon for Gnea Research LLC
   Copyright (c) 2009-2011 Simen Svale Skogsrud
 
@@ -119,7 +119,9 @@ typedef enum {
     Status_FileOpenFailed = 84,
     Status_FsFormatFailed = 85,
     Status_AuxiliaryPortUnusable = 86,
-    Status_StatusMax = Status_AuxiliaryPortUnusable,
+    Status_ToolInSPindle = 87,
+    Status_NoToolInSPindle = 88,
+    Status_StatusMax = Status_NoToolInSPindle,
     Status_UserException = 253,
     Status_Handled,   // For internal use only
     Status_Unhandled  // For internal use only

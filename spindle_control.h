@@ -3,7 +3,7 @@
 
   Part of grblHAL
 
-  Copyright (c) 2017-2025 Terje Io
+  Copyright (c) 2017-2026 Terje Io
   Copyright (c) 2012-2015 Sungeun K. Jeon
   Copyright (c) 2009-2011 Simen Svale Skogsrud
 
@@ -220,9 +220,17 @@ typedef union {
                 pwm_disable           :1, // PWM spindle only
                 g92offset             :1,
                 pwm_ramped            :1, // PWM spindle only
-                unassigned            :3;
+                ignore_delays         :1, // PWM spindle only
+                unassigned            :2;
     };
 } spindle_settings_flags_t;
+
+#if N_SPINDLE == 1
+#define PWM_SPINDLE_NO_DELAYS
+#else
+#define PWM_SPINDLE_NO_DELAYS ",Ignore on/off delays"
+#endif
+
 
 typedef union {
     uint8_t value;
@@ -348,8 +356,12 @@ typedef struct spindle_param {
     spindle_state_t state;
     override_t override_pct;    //!< Spindle RPM override value in percent
     spindle_css_data_t css;     //!< Data used for Constant Surface Speed Mode (CSS) calculations, NULL if not in CSS mode.
-    bool ramp_up;
-    bool ramp_down;
+    struct {
+        uint8_t ramp_up          :1,
+                ramp_down        :1,
+                ignore_delays    :1,
+                override_disable :1;
+    } option;
     spindle_ptrs_t *hal;
 } spindle_param_t;
 

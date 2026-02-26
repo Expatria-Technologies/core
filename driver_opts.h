@@ -5,7 +5,7 @@
 
   Part of grblHAL
 
-  Copyright (c) 2020-2025 Terje Io
+  Copyright (c) 2020-2026 Terje Io
 
   grblHAL is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -450,12 +450,18 @@
 #endif
 #endif
 
+#ifndef ENCODER_ENABLE
+#define ENCODER_ENABLE      0
+#endif
+
 #ifndef QEI_ENABLE
+#if ENCODER_ENABLE
+#define QEI_ENABLE          1
+#else
 #define QEI_ENABLE          0
 #endif
-#ifndef QEI_SELECT_ENABLE
-#define QEI_SELECT_ENABLE   0
 #endif
+
 #ifndef ODOMETER_ENABLE
 #define ODOMETER_ENABLE     0
 #endif

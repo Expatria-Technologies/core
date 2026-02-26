@@ -115,23 +115,10 @@ FLASHMEM static void change_completed (void)
 #endif
 }
 
-// Reset claimed HAL entry points and restore previous tool if needed on soft restart.
+// Reset claimed HAL entry points on soft restart.
 // Called from EXEC_RESET and EXEC_STOP handlers (via HAL).
 FLASHMEM static void reset (void)
 {
-    if(next_tool) { //TODO: move to gc_xxx() function?
-        // Restore previous tool if reset is during change
-        if(current_tool.tool_id != next_tool->tool_id) {
-            if(grbl.tool_table.n_tools)
-                memcpy(gc_state.tool, &current_tool, sizeof(tool_data_t));
-            else
-                memcpy(next_tool, &current_tool, sizeof(tool_data_t));
-            report_add_realtime(Report_Tool);
-        }
-        gc_state.tool_pending = gc_state.tool->tool_id;
-        next_tool = NULL;
-    }
-
     change_completed();
     driver_reset();
 }

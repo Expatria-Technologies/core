@@ -7,7 +7,7 @@
 
   Part of grblHAL
 
-  Copyright (c) 2021-2025 Terje Io
+  Copyright (c) 2021-2026 Terje Io
 
   grblHAL is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -179,6 +179,11 @@
 #if HOMING_PULLOFF_ENABLE
     extern void homing_pulloff_init (void);
     homing_pulloff_init();
+#endif
+
+#if ENCODER_ENABLE
+    extern bool encoder_init (void);
+    encoder_init();
 #endif
 
 #if PERSISTENT_TOOL_ENABLE

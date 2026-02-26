@@ -143,6 +143,7 @@ typedef tool_table_entry_t *(*get_tool_ptr)(tool_id_t tool_id);
 typedef tool_table_entry_t *(*get_tool_by_idx_ptr)(uint32_t idx);
 typedef bool (*set_tool_data_ptr)(tool_data_t *tool_data);
 typedef bool (*clear_tool_data_ptr)(void);
+typedef status_code_t (*reload_tool_data_ptr)(void);
 
 typedef struct {
     uint32_t n_tools;
@@ -150,6 +151,7 @@ typedef struct {
     get_tool_by_idx_ptr get_tool_by_idx;
     set_tool_data_ptr set_tool;
     clear_tool_data_ptr clear;
+    reload_tool_data_ptr reload;
 } tool_table_t;
 
 /*****************

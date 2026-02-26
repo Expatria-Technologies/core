@@ -3,7 +3,7 @@
 
   Part of grblHAL
 
-  Copyright (c) 2017-2025 Terje Io
+  Copyright (c) 2017-2026 Terje Io
   Copyright (c) 2011-2016 Sungeun K. Jeon for Gnea Research LLC
   Copyright (c) 2009-2011 Simen Svale Skogsrud
 
@@ -107,7 +107,9 @@ PROGMEM static const status_detail_t status_detail[] = {
 #endif
     { Status_FileOpenFailed, "Could not open file." },
     { Status_UserException, "User defined error occured." },
-    { Status_AuxiliaryPortUnusable, "Port is not usable." }
+    { Status_AuxiliaryPortUnusable, "Port is not usable." },
+    { Status_ToolInSPindle, "Tool in spindle." },
+    { Status_NoToolInSPindle, "No tool in spindle." }
 };
 
 static error_details_t details = {

@@ -29,10 +29,12 @@
 
 #include "hal.h"
 #include "config.h"
+#include "encoders.h"
 #include "machine_limits.h"
 #include "nvs_buffer.h"
 #include "tool_change.h"
 #include "state_machine.h"
+#include "strutils.h"
 #if ENABLE_BACKLASH_COMPENSATION
 #include "motion_control.h"
 #endif
@@ -738,17 +740,26 @@ static status_code_t set_pwm_mode (setting_id_t id, uint_fast16_t int_value)
 static status_code_t set_pwm_options (setting_id_t id, uint_fast16_t int_value)
 {
     if(int_value & 0b0001) {
-        if(int_value > 0b1111)
+#if N_SPINDLE > 1
+        if(int_value > 0b11111)
             return Status_SettingValueOutOfRange;
+#else
+        if(int_value > 0b01111)
+            return Status_SettingValueOutOfRange;
+#endif
         settings.pwm_spindle.flags.pwm_disable = Off;
-        settings.pwm_spindle.flags.enable_rpm_controlled = !!(int_value & 0b0010);
-        settings.pwm_spindle.flags.laser_mode_disable = !!(int_value & 0b0100);
-        settings.pwm_spindle.flags.pwm_ramped = !!(int_value & 0b1000);
+        settings.pwm_spindle.flags.enable_rpm_controlled = !!(int_value & 0b00010);
+        settings.pwm_spindle.flags.laser_mode_disable = !!(int_value & 0b00100);
+        settings.pwm_spindle.flags.pwm_ramped = !!(int_value & 0b01000);
+#if N_SPINDLE > 1
+        settings.pwm_spindle.flags.ignore_delays = !!(int_value & 0b10000);
+#endif
     } else {
         settings.pwm_spindle.flags.pwm_disable = On;
         settings.pwm_spindle.flags.enable_rpm_controlled =
          settings.pwm_spindle.flags.laser_mode_disable =
-          settings.pwm_spindle.flags.pwm_ramped = Off;
+          settings.pwm_spindle.flags.pwm_ramped =
+           settings.pwm_spindle.flags.ignore_delays = Off;
     }
 
     return Status_OK;
@@ -1520,9 +1531,10 @@ FLASHMEM static uint32_t get_int (setting_id_t id)
             value = settings.pwm_spindle.flags.pwm_disable
                      ? 0
                      : (0b0001 |
-                        (settings.pwm_spindle.flags.enable_rpm_controlled ? 0b0010 : 0) |
-                         (settings.pwm_spindle.flags.laser_mode_disable ? 0b0100 : 0) |
-                          (settings.pwm_spindle.flags.pwm_ramped ? 0b1000 : 0));
+                        (settings.pwm_spindle.flags.enable_rpm_controlled ? 0b00010 : 0) |
+                         (settings.pwm_spindle.flags.laser_mode_disable ? 0b00100 : 0) |
+                          (settings.pwm_spindle.flags.pwm_ramped ? 0b01000 : 0) |
+                           (settings.pwm_spindle.flags.ignore_delays ? 0b10000 : 0));
             break;
 
         case Setting_Mode:
@@ -2068,7 +2080,7 @@ PROGMEM static const setting_detail_t setting_detail[] = {
      { Setting_InvertProbePin, Group_Probing, "Invert probe inputs", NULL, Format_Bitfield, probe_signals, NULL, NULL, Setting_IsLegacyFn, set_probe_invert, get_int, is_setting_available },
      { Setting_SpindlePWMBehaviour, Group_Spindle, "Deprecated", NULL, Format_Bool, NULL, NULL, NULL, Setting_IsLegacyFn, set_pwm_mode, get_int, is_setting_available },
      { Setting_GangedDirInvertMask, Group_Stepper, "Ganged axes direction invert", NULL, Format_Bitfield, ganged_axes, NULL, NULL, Setting_IsExtendedFn, set_ganged_dir_invert, get_int, is_setting_available },
-     { Setting_SpindlePWMOptions, Group_Spindle, "PWM spindle options", NULL, Format_XBitfield, "Enable,RPM controls spindle enable signal,Disable laser mode capability,Enable ramping", NULL, NULL, Setting_IsExtendedFn, set_pwm_options, get_int, is_setting_available },
+     { Setting_SpindlePWMOptions, Group_Spindle, "PWM spindle options", NULL, Format_XBitfield, "Enable,RPM controls spindle enable signal,Disable laser mode capability,Enable ramping" PWM_SPINDLE_NO_DELAYS, NULL, NULL, Setting_IsExtendedFn, set_pwm_options, get_int, is_setting_available },
 #if COMPATIBILITY_LEVEL <= 1
      { Setting_StatusReportMask, Group_General, "Status report options", NULL, Format_Bitfield, "Position in machine coordinate,Buffer state,Line numbers,Feed & speed,Pin state,Work coordinate offset,Overrides,Probe coordinates,Buffer sync on WCO change,Parser state,Alarm substatus,Run substatus,Enable when homing,Distance-to-go", NULL, NULL, Setting_IsExtendedFn, set_report_mask, get_int, NULL },
 #else
@@ -2685,6 +2697,10 @@ FLASHMEM static void sanity_check (void)
     settings.steppers.rotary_wrap.mask &= settings.steppers.is_rotary.mask;
 #endif
 
+#if N_SPINDLE == 1
+    settings.pwm_spindle.flags.ignore_delays = Off;
+#endif
+
     settings.control_invert.mask |= limits_override.mask;
     settings.control_disable_pullup.mask &= ~limits_override.mask;
 }
@@ -2906,7 +2922,7 @@ static inline const setting_detail_t *_setting_get_details (setting_id_t id, uin
                 if(details->settings[idx].group == Group_Axis0 && grbl.on_set_axis_setting_unit)
                     set_axis_unit(&details->settings[idx], grbl.on_set_axis_setting_unit(details->settings[idx].id, offset));
 
-                if(offset && details->iterator == NULL && offset >= (details->settings[idx].group == Group_Encoder0 ? hal.encoder.get_n_encoders() : N_AXIS))
+                if(offset && details->iterator == NULL && offset >= (details->settings[idx].group == Group_Encoder0 ? encoders_get_count() : N_AXIS))
                     return NULL;
 
                 if(set)
@@ -3060,22 +3076,6 @@ FLASHMEM static status_code_t validate_uint_value (const setting_detail_t *setti
     }
 
     return Status_OK;
-}
-
-FLASHMEM static uint32_t strnumentries (const char *s, const char delimiter)
-{
-    if(s == NULL || *s == '\0')
-        return 0;
-
-    char *p = (char *)s;
-    uint32_t entries = 1;
-
-    while((p = strchr(p, delimiter))) {
-        p++;
-        entries++;
-    }
-
-    return entries;
 }
 
 FLASHMEM setting_datatype_t setting_datatype_to_external (setting_datatype_t datatype)

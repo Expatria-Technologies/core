@@ -1,10 +1,55 @@
 ## grblHAL changelog
 
+<a name="20260225">Build 20260225
+
+Core:
+
+* Fix incorrect behaviour when a tool change using the built-in workflow is aborted, the selected tool was set as the current tool.
+
+* Clarification: `G66` macros calls are not run on their first invocation and will only be run on subsequent blocks containing axis words for `G0` or `G1` motion.
+Subsequent blocks may contain either the `G0` or `G1` command word, if not their modal state will be used. The macro will be called after the motion has been sent to the planner.
+
+* Added support for `G66.1` macro call. Unlike `G66` this is run on the first invocation and for each subsequent block containing parameter word\(s\) used in the first invocation.
+Parameter values changed in subsequent blocks are "sticky", that is they will keep their value for subsequent blocks until changed again.
+
+> [!NOTE]
+> `G66` and `G66.1` behaviour may change in later builds since I have not found any definite specification, it seems that there are different implementations between controllers.  
+> grbHAL aims to adopt the Fanuc behaviour, but this has not been verified.
+
+* Changed behaviour of `G50` and `G51` \(and the `G48` and `G49` shortcuts\) controlling feed rate and spindle RPM overrides.  
+When used with `P0` to turn off the feed rate and/or the spindle RPM will be reverted to their programmed values.
+The override values can still be changed and any changed value will be output in the real time report.
+When turned back on the current override value\(s\) will be reapplied.
+
+* Added support for `G10L0`, reload file based tool table. Can only be used when no tool (tool 0) is in the spindle.
+
+* Fixed buggy handling of `G43` - apply tool offset from tool table.
+
+* Refactored the encoder HAL/API to make it more flexible and as a first step to support rigid tapping.  
+For programmers: encoders are now registered with the core allowing them to be added from both drivers and plugins.
+Plugins can now claim encoders, and code has been added to the core to make it easy for drivers and plugins to bind a slow encoder to interrupt capable auxiliary inputs.
+> [!NOTE]
+> The new HAL/API will be extended as needed later.
+
+Drivers:
+
+* iMXRT1062, STM32F4xx, STM32F7xx: updated for the new encoder HAL/API.
+
+* RP2040: fixed typos affecting limit switch inversion for A+ axes.
+
+Plugins:
+
+* Encoder: updated to use the new encoder HAL/API.
+
+* Misc, Tool table: added support for `G10L0`, reload tool table.
+
+---
+
 <a name="20260218">Build 20260218
 
 Core:
 
-* Changed `$pinstates` command output, now reports pin number instead of pin id.
+* Changed `$pinstate` command output, now reports pin number instead of pin id.
 
 * For developers: added API call that returns Modbus stream handlers.
 

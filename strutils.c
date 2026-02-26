@@ -25,16 +25,15 @@
 #include <stdbool.h>
 #include <stdio.h>
 
+#include "grbl.h"
 #include "strutils.h"
-
-#define CAPS(c) ((c >= 'a' && c <= 'z') ? c & 0x5F : c)
 
 /*! \brief Case insensitive search for first occurrence of a string inside another.
 \param s1 pointer to string to search.
 \param s2 pointer to string to search for.
 \returns pointer to found string or NULL if not found.
 */
-char *stristr (const char *s1, const char *s2)
+FLASHMEM char *stristr (const char *s1, const char *s2)
 {
     const char *s = s1, *p = s2, *r = NULL;
 
@@ -69,7 +68,7 @@ char *stristr (const char *s1, const char *s2)
 \param len max. number of characters to compare.
 \returns pointer to found string or NULL if not found.
 */
-char *strnistr (const char *s1, const char *s2, size_t len)
+FLASHMEM char *strnistr (const char *s1, const char *s2, size_t len)
 {
     size_t slen = len;
     const char *s = s1, *p = s2, *r = NULL;
@@ -102,8 +101,9 @@ char *strnistr (const char *s1, const char *s2, size_t len)
     return slen == 0 || *p == '\0' ? (char *)r : NULL;
 }
 
-// NOTE: ensure buf is large enough to hold concatenated strings!
-char *strappend (char *buf, int argc, ...)
+// NOTE: Ensure buf is large enough to hold concatenated strings!
+//       Do NOT use for several int/float conversions as these share the same underlying buffer!
+FLASHMEM char *strappend (char *buf, int argc, ...)
 {
     char c, *s = buf, *arg;
 
@@ -123,10 +123,10 @@ char *strappend (char *buf, int argc, ...)
     return buf;
 }
 
-uint32_t strnumentries (const char *s, const char delimiter)
+FLASHMEM uint32_t strnumentries (const char *s, const char delimiter)
 {
     char *p = (char *)s;
-    uint32_t entries = *s ? 1 : 0;
+    uint32_t entries = (s && *s) ? 1 : 0;
 
     while(entries && (p = strchr(p, delimiter))) {
         p++;
@@ -136,7 +136,7 @@ uint32_t strnumentries (const char *s, const char delimiter)
     return entries;
 }
 
-char *strgetentry (char *res, const char *s, uint32_t entry, const char delimiter)
+FLASHMEM char *strgetentry (char *res, const char *s, uint32_t entry, const char delimiter)
 {
     char *e, *p = (char *)s;
 
@@ -163,7 +163,7 @@ char *strgetentry (char *res, const char *s, uint32_t entry, const char delimite
     return res;
 }
 
-int32_t strlookup (const char *s1, const char *s2, const char delimiter)
+FLASHMEM int32_t strlookup (const char *s1, const char *s2, const char delimiter)
 {
     bool found = false;
     char *e, *p = (char *)s2;
@@ -188,7 +188,7 @@ int32_t strlookup (const char *s1, const char *s2, const char delimiter)
     return found ? entry : -1;
 }
 
-bool strtotime (char *s, struct tm *time)
+FLASHMEM bool strtotime (char *s, struct tm *time)
 {
     char c, *s1 = s;
     uint_fast16_t idx = 0;
@@ -285,7 +285,7 @@ bool strtotime (char *s, struct tm *time)
     return idx >= 5;
 }
 
-char *strtoisodt (struct tm *dt)
+FLASHMEM char *strtoisodt (struct tm *dt)
 {
     static char buf[21];
 
@@ -295,9 +295,9 @@ char *strtoisodt (struct tm *dt)
     return buf;
 }
 
-char *strtointernetdt (struct tm *dt)
+FLASHMEM char *strtointernetdt (struct tm *dt)
 {
-    static const char *month_table[12] = {
+    PROGMEM static const char *month_table[12] = {
         "Jan",
         "Feb",
         "Mar",
@@ -312,7 +312,7 @@ char *strtointernetdt (struct tm *dt)
         "Dec"
     };
 
-    static const char *day_table[7] = {
+    PROGMEM static const char *day_table[7] = {
         "Sun",
         "Mon",
         "Tue",

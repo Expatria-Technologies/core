@@ -5,7 +5,7 @@
 
   Part of grblHAL
 
-  Copyright (c) 2021-2025 Terje Io
+  Copyright (c) 2021-2026 Terje Io
 
   grblHAL is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -49,7 +49,7 @@
 #error "MPG mode input is not supported in this configuration!"
 #endif
 
-#if QEI_SELECT_ENABLE && !defined(QEI_SELECT_PIN)
+#if (ENCODER_ENABLE & 1) && !defined(QEI_SELECT_PIN)
 #error "Encoder select input is not supported in this configuration!"
 #endif
 
@@ -157,12 +157,16 @@ static aux_ctrl_t aux_ctrl[] = {
 #if MPG_ENABLE == 1 && defined(MPG_MODE_PIN)
     add_aux_input(Input_MPGSelect, MPG_MODE, IRQ_Mode_Change, 0)
 #endif
-#if QEI_SELECT_ENABLE && defined(QEI_SELECT_PIN)
+#if QEI_ENABLE && defined(QEI_A_PIN) && defined(QEI_B_PIN)
+    add_aux_input(Input_QEI_A, QEI_A, IRQ_Mode_Change, 0)
+    add_aux_input(Input_QEI_B, QEI_B, IRQ_Mode_Change, 0)
+#endif
+#if (ENCODER_ENABLE & 1) && defined(QEI_SELECT_PIN)
     add_aux_input(Input_QEI_Select, QEI_SELECT, IRQ_Mode_RisingFalling, 0)
 #endif
 // Probe pins can be bound explicitly and can be "degraded" to not interrupt capable.
 #if PROBE_ENABLE && defined(PROBE_PIN)
-    add_aux_input(Input_Probe, PROBE, IRQ_Mode_RisingFalling, 0)
+    add_aux_input(Input_Probe, PROBE, IRQ_Mode_Change, 0)
 #endif
 #if PROBE2_ENABLE && defined(PROBE2_PIN)
     add_aux_input(Input_Probe2, PROBE2, IRQ_Mode_RisingFalling, 0)
@@ -198,9 +202,17 @@ static aux_ctrl_t aux_ctrl[] = {
 #endif
 };
 
+
+// General inputs
+
 static inline bool aux_ctrl_is_probe (pin_function_t function)
 {
     return function == Input_Probe || function == Input_Probe2 || function == Input_Toolsetter;
+}
+
+static inline bool aux_ctrl_is_encoder (pin_function_t function)
+{
+    return function == Input_QEI_A || function == Input_QEI_B || function == Input_QEI_Select;
 }
 
 #ifdef STM32_PLATFORM
@@ -228,11 +240,10 @@ static inline xbar_t *aux_ctrl_claim_port (aux_ctrl_t *aux_ctrl)
 
     if(aux_ctrl) {
         if(aux_ctrl->port != IOPORT_UNASSIGNED && (pin = ioport_claim(Port_Digital, Port_Input, &aux_ctrl->port, NULL))) {
-
             aux_ctrl->gpio.port = pin->port;
             aux_ctrl->gpio.pin = pin->pin;
-
-            ioport_set_function(pin, aux_ctrl->function, &aux_ctrl->signal);
+            if(ioport_set_function(pin, aux_ctrl->function, &aux_ctrl->signal))
+                pin->function = aux_ctrl->function;
         } else
             aux_ctrl->port = IOPORT_UNASSIGNED;
     }
@@ -279,7 +290,7 @@ static inline void aux_ctrl_irq_enable (settings_t *settings, ioport_interrupt_c
 
     if(idx) do {
         if(aux_ctrl[--idx].port != 0xFF && aux_ctrl[idx].irq_mode != IRQ_Mode_None) {
-            if(!aux_ctrl_is_probe(aux_ctrl[idx].function)) {
+            if(!(aux_ctrl_is_probe(aux_ctrl[idx].function) || aux_ctrl_is_encoder(aux_ctrl[idx].function))) {
                 pin_irq_mode_t irq_mode;
                 if((irq_mode = aux_ctrl[idx].irq_mode) & IRQ_Mode_RisingFalling)
                     irq_mode = (settings->control_invert.mask & aux_ctrl[idx].signal.mask) ? IRQ_Mode_Falling : IRQ_Mode_Rising;
@@ -560,7 +571,7 @@ static inline void aux_ctrl_claim_out_ports (aux_claim_explicit_out_ptr aux_clai
 #endif
 
 // IRQ enabled input singnals
-
+/*
 #if QEI_ENABLE
 #ifndef QEI_A_BIT
 #define QEI_A_BIT (1<<QEI_A_PIN)
@@ -568,10 +579,10 @@ static inline void aux_ctrl_claim_out_ports (aux_claim_explicit_out_ptr aux_clai
 #ifndef QEI_B_BIT
 #define QEI_B_BIT (1<<QEI_B_PIN)
 #endif
-#else
+#else*/
 #define QEI_A_BIT 0
 #define QEI_B_BIT 0
-#endif
+//#endif
 
 #ifndef QEI_SELECT_BIT
 #define QEI_SELECT_BIT 0

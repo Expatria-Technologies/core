@@ -3,7 +3,7 @@
 
   Part of grblHAL
 
-  Copyright (c) 2019-2025 Terje Io
+  Copyright (c) 2019-2026 Terje Io
   Copyright (c) 2011-2016 Sungeun K. Jeon for Gnea Research LLC
   Copyright (c) 2009-2011 Simen Svale Skogsrud
 
@@ -162,6 +162,10 @@ typedef struct {
   float previous_unit_vec[N_AXIS];  // Unit vector of previous path line segment
   float previous_nominal_speed;     // Nominal speed of previous path line segment
   float actual_rpm;                 // Updated when in units per revolution blocks (G95) mode.
+  struct {
+      override_t feed_rate;         //!< Feed rate override value in percent
+      override_t rapid_rate;        //!< Rapids override value in percent
+  } override;
 } planner_t;
 
 // Initialize and reset the motion plan subsystem

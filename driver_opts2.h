@@ -5,7 +5,7 @@
 
   Part of grblHAL
 
-  Copyright (c) 2024-2025 Terje Io
+  Copyright (c) 2024-2026 Terje Io
 
   grblHAL is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -41,6 +41,10 @@
 
 #if (DRIVER_SPINDLE1_ENABLE & SPINDLE_PWM) && !defined(SPINDLE1_PWM_PIN)
 #warning "Selected spindle 1 is not supported!"
+#endif
+
+#if ENCODER_ENABLE > 0 && !(defined(QEI_A_PIN) && defined(QEI_B_PIN))
+#warning "ENCODER_ENABLE requires encoder input pins A and B to be defined!"
 #endif
 
 #endif

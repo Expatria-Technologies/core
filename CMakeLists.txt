@@ -42,6 +42,7 @@ target_sources(grbl INTERFACE
  ${CMAKE_CURRENT_LIST_DIR}/utf8.c
  ${CMAKE_CURRENT_LIST_DIR}/vfs.c
  ${CMAKE_CURRENT_LIST_DIR}/canbus.c
+ ${CMAKE_CURRENT_LIST_DIR}/encoders.c
  ${CMAKE_CURRENT_LIST_DIR}/pid.c
  ${CMAKE_CURRENT_LIST_DIR}/fs_device.c
  ${CMAKE_CURRENT_LIST_DIR}/kinematics/corexy.c
