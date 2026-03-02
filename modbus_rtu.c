@@ -459,7 +459,7 @@ static bool modbus_rtu_isup (void)
 
 static bool modbus_is_busy (void)
 {
-    return state != STATE_IDLE;
+    return state != ModBus_Idle;
 }
 
 FLASHMEM static void modbus_rtu_flush_queue (void)

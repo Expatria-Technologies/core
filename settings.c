@@ -2187,7 +2187,7 @@ PROGMEM static const setting_detail_t setting_detail[] = {
      { Setting_AxisHomingFeedRate, Group_Axis0, "-axis homing locate feed rate", axis_rate, Format_Decimal, "###0", NULL, NULL, Setting_NonCoreFn, set_axis_setting, get_float, is_setting_available, AXIS_OPTS },
      { Setting_AxisHomingSeekRate, Group_Axis0, "-axis homing search seek rate", axis_rate, Format_Decimal, "###0", NULL, NULL, Setting_NonCoreFn, set_axis_setting, get_float, is_setting_available, AXIS_OPTS },
      { Setting_SpindleAtSpeedTolerance, Group_Spindle, "Spindle at speed tolerance", "percent", Format_Decimal, "##0.0", NULL, NULL, Setting_IsExtendedFn, set_float, get_float, is_setting_available },
-     { Setting_ToolChangeMode, Group_Toolchange, "Tool change mode", NULL, Format_RadioButtons, "Normal,Manual touch off,Manual touch off @ G59.3,Automatic touch off @ G59.3,Ignore M6", NULL, NULL, Setting_IsExtendedFn, set_tool_change_mode, get_int, is_setting_available },
+     { Setting_ToolChangeMode, Group_Toolchange, "Tool change mode", NULL, Format_RadioButtons, "Normal,Manual touch off,Manual touch off @ G59.3,Automatic touch off @ G59.3,Fully Automatic @G59.3,Ignore M6", NULL, NULL, Setting_IsExtendedFn, set_tool_change_mode, get_int, is_setting_available },
      { Setting_ToolChangeProbingDistance, Group_Toolchange, "Tool change probing distance", "mm", Format_Decimal, "#####0.0", NULL, NULL, Setting_IsExtendedFn, set_tool_change_probing_distance, get_float, is_setting_available },
      { Setting_ToolChangeFeedRate, Group_Toolchange, "Tool change locate feed rate", "mm/min", Format_Decimal, "#####0.0", NULL, NULL, Setting_IsExtended, &settings.tool_change.feed_rate, NULL, is_setting_available },
      { Setting_ToolChangeSeekRate, Group_Toolchange, "Tool change search seek rate", "mm/min", Format_Decimal, "#####0.0", NULL, NULL, Setting_IsExtended, &settings.tool_change.seek_rate, NULL, is_setting_available },
@@ -2385,6 +2385,7 @@ PROGMEM static const setting_descr_t setting_descr[] = {
                               "Manual touch off: rapids to tool change position, use jogging or $TPW for touch off.\\n\\n"
                               "Manual touch off @ G59.3: rapids to tool change position, after change to G59.3 position for manual touch off. Use jogging or $TPW for touch off.\\n\\n"
                               "Automatic touch off @ G59.3: rapids to tool change position, after change to G59.3 position for automatic touch off.\\n\\n"
+                              "Fully automatic uses LinuxCNC style tool table and automatic measurement at G59.3.\\n\\n"
                               "Depending on settings the tool (controlled point) will be moved back to the to original position after touch off. "
                               "\"tool change position\" is either tool axis home, G59.3 or G30 position depending on settings."
     },
