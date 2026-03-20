@@ -2778,7 +2778,7 @@ status_code_t gc_execute_block (char *block)
             // [G10 L0 Errors]:  No tool table or tool in spindle.
             // [G10 L1, L10, L11 Errors]: P must be 0 to grbl.tool_table.n_tools. Axis words or R word missing.
 
-            uint8_t p_value = 0;
+            int32_t p_value = 0;
 
             if(gc_block.values.l > 0) {
 
@@ -2791,7 +2791,7 @@ status_code_t gc_execute_block (char *block)
                 if(gc_block.values.p < 0.0f)
                     RETURN(Status_NegativeValue);
 
-                p_value = (uint8_t)truncf(gc_block.values.p); // Convert p value to int.
+                p_value = (int32_t)truncf(gc_block.values.p); // Convert p value to int.
             }
 
             switch(gc_block.values.l) {
